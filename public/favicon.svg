@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#0b1110"/>
+  <rect x="2" y="2" width="28" height="28" rx="6" stroke="#233832" stroke-width="2"/>
+  <!-- Yunque / forja pixelada -->
+  <path d="M8 22H24V25H8V22Z" fill="#34d399"/>
+  <path d="M12 18H20V22H12V18Z" fill="#10b981"/>
+  <path d="M6 13H26V18H21V16H11V18H6V13Z" fill="#059669"/>
+  <!-- Llama / chispa de fundición -->
+  <path d="M14 7H18V11H14V7Z" fill="#fbbf24"/>
+  <path d="M15 5H17V7H15V5Z" fill="#fb923c"/>
+</svg>
