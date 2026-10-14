@@ -194,8 +194,14 @@ export function finalizePostings(lines: Posting[]): Posting[] {
   if (sum !== 0) throw new OperationError('La operación no está balanceada (error interno).')
   if (result.length < 2) throw new OperationError('La operación no tiene movimientos suficientes.')
   for (const l of result) {
-    if ((l.targetType === 'equity') !== (l.targetId === null)) {
-      throw new OperationError('Línea contable con destino inválido (error interno).')
+    if (l.targetType === 'equity') {
+      if (l.targetId !== null) {
+        throw new OperationError('Línea contable con destino inválido (error interno).')
+      }
+    } else {
+      if (!l.targetId || typeof l.targetId !== 'string' || l.targetId.trim() === '') {
+        throw new OperationError(`Línea contable de tipo ${l.targetType} requiere un destino válido.`)
+      }
     }
   }
   return result
@@ -243,7 +249,10 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
       const fees = nonNegative(op.fees, 'Los cargos')
       const total = principal + interest + fees
       if (total <= 0) throw new OperationError('El pago debe ser mayor que cero.')
-      const lines = [line('account', op.accountId, -total, 'payment'), line('debt', op.debtId, principal, 'principal')]
+      if (!op.debtId || typeof op.debtId !== 'string' || op.debtId.trim() === '') {
+        throw new OperationError('Se requiere una deuda para registrar el pago.')
+      }
+      const lines = [line('account', op.accountId, -total, 'payment'), line('debt', op.debtId.trim(), principal, 'principal')]
       if (interest > 0) {
         lines.push(line('category', requireSystemCategory(ctx, 'financial_interest'), interest, 'interest'))
       }
@@ -253,17 +262,23 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
     case 'debt_charge': {
       const amount = positive(op.amount, 'El cargo')
       const key: SystemCategoryKey = op.chargeType === 'interest' ? 'financial_interest' : 'financial_fees'
+      if (!op.debtId || typeof op.debtId !== 'string' || op.debtId.trim() === '') {
+        throw new OperationError('Se requiere una deuda para registrar el cargo.')
+      }
       return [
         line('category', requireSystemCategory(ctx, key), amount, op.chargeType === 'interest' ? 'interest' : 'fee'),
-        line('debt', op.debtId, -amount, op.chargeType === 'interest' ? 'interest' : 'fee'),
+        line('debt', op.debtId.trim(), -amount, op.chargeType === 'interest' ? 'interest' : 'fee'),
       ]
     }
     case 'debt_disbursement': {
       const amount = positive(op.amount, 'El valor del crédito')
       const fees = nonNegative(op.upfrontFees, 'Los costos descontados')
       if (fees >= amount) throw new OperationError('Los costos descontados deben ser menores que el crédito.')
+      if (!op.debtId || typeof op.debtId !== 'string' || op.debtId.trim() === '') {
+        throw new OperationError('Se requiere una deuda para registrar el desembolso.')
+      }
       const lines = [
-        line('debt', op.debtId, -amount, 'disbursement'),
+        line('debt', op.debtId.trim(), -amount, 'disbursement'),
         line('account', op.accountId, amount - fees, 'disbursement'),
       ]
       if (fees > 0) lines.push(line('category', requireSystemCategory(ctx, 'financial_fees'), fees, 'fee'))
@@ -271,8 +286,11 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
     }
     case 'loan_given': {
       const amount = positive(op.amount, 'El valor prestado')
+      if (!op.loanId || typeof op.loanId !== 'string' || op.loanId.trim() === '') {
+        throw new OperationError('Se requiere un deudor o préstamo válido.')
+      }
       return [
-        line('loan', op.loanId, amount, 'principal'),
+        line('loan', op.loanId.trim(), amount, 'principal'),
         op.accountId === null
           ? line('equity', null, -amount, 'adjustment')
           : line('account', op.accountId, -amount, 'principal'),
@@ -282,9 +300,12 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
       const principal = nonNegative(op.principal, 'El capital devuelto')
       const interest = nonNegative(op.interest, 'Los intereses')
       if (principal + interest <= 0) throw new OperationError('La devolución debe ser mayor que cero.')
+      if (!op.loanId || typeof op.loanId !== 'string' || op.loanId.trim() === '') {
+        throw new OperationError('Se requiere un deudor o préstamo para registrar la devolución.')
+      }
       const lines = [
         line('account', op.accountId, principal + interest, 'payment'),
-        line('loan', op.loanId, -principal, 'principal'),
+        line('loan', op.loanId.trim(), -principal, 'principal'),
       ]
       if (interest > 0) {
         lines.push(line('category', requireSystemCategory(ctx, 'interest_income'), -interest, 'interest'))

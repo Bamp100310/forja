@@ -74,4 +74,31 @@ describe('Módulo de Préstamos — Cuentas por Cobrar y Devoluciones', () => {
     const summaryOverdue = summarizeLoan(loan, [lend], '2026-10-20')
     expect(summaryOverdue.status).toBe('vencido')
   })
+
+  it('generateUUID genera UUIDs válidos RFC 4122 v4', async () => {
+    const { generateUUID, isValidUUID } = await import('./uuid')
+    const id1 = generateUUID()
+    const id2 = generateUUID()
+    expect(isValidUUID(id1)).toBe(true)
+    expect(isValidUUID(id2)).toBe(true)
+    expect(id1).not.toBe(id2)
+  })
+
+  it('buildTransactionDraft rechaza loan_given sin loanId válido', async () => {
+    const { buildTransactionDraft, OperationError } = await import('./ledger/operations')
+    const { categories } = await import('../test/fixtures')
+    expect(() =>
+      buildTransactionDraft(
+        {
+          kind: 'loan_given',
+          date: '2026-10-13',
+          description: 'Préstamo inválido',
+          loanId: '',
+          accountId: 'acc-cash',
+          amount: 50_000,
+        },
+        { categories }
+      )
+    ).toThrow(OperationError)
+  })
 })

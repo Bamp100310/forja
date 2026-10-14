@@ -247,4 +247,58 @@ describe('Integración PostgreSQL + RLS con PGlite', () => {
     const totalsAfter = await db.query(`select * from public.ledger_target_totals where target_id = '${acc}';`)
     expect(Number(totalsAfter.rows[0].total)).toBe(-25000)
   })
+
+  it('save_transaction_atomic crea préstamo nuevo atómicamente con p_new_loan y valida el libro contable', async () => {
+    const db = await setupTestDb()
+
+    await asUser(db, USER_1)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    const accInsert = await db.query(`
+      insert into public.accounts (user_id, name, kind, opening_balance, opening_date)
+      values ('${USER_1}', 'Bóveda Efectivo', 'cash', 100000, '2026-09-01')
+      returning id;
+    `)
+    const acc = accInsert.rows[0].id
+    const loanUuid = '77777777-7777-4777-a777-777777777777'
+
+    const txPayload = JSON.stringify({
+      date: '2026-10-13',
+      kind: 'loan_given',
+      description: 'Préstamo a Mateo',
+      loan_id: loanUuid,
+      client_request_id: 'req-loan-mateo-1',
+    })
+
+    const postingsPayload = JSON.stringify([
+      { target_type: 'loan', target_id: loanUuid, amount: 87400, role: 'principal' },
+      { target_type: 'account', target_id: acc, amount: -87400, role: 'principal' },
+    ])
+
+    const newLoanPayload = JSON.stringify({
+      id: loanUuid,
+      person_name: 'Mateo',
+      start_date: '2026-10-13',
+      due_date: null,
+      notes: null,
+    })
+
+    const res = await db.query(`select public.save_transaction_atomic($1::jsonb, $2::jsonb, $3::jsonb) as res;`, [
+      txPayload,
+      postingsPayload,
+      newLoanPayload,
+    ])
+    const txId = (res.rows[0].res as { id: string }).id
+    expect(txId).toBeDefined()
+
+    // Comprobar que el préstamo fue creado y pertenece al usuario
+    const loanRow = await db.query(`select * from public.loans where id = '${loanUuid}';`)
+    expect(loanRow.rows.length).toBe(1)
+    expect(loanRow.rows[0].person_name).toBe('Mateo')
+    expect(loanRow.rows[0].user_id).toBe(USER_1)
+
+    // Comprobar totales agregados
+    const totals = await db.query(`select * from public.ledger_target_totals where target_id = '${loanUuid}';`)
+    expect(Number(totals.rows[0].total)).toBe(87400)
+  })
 })
