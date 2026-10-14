@@ -541,6 +541,8 @@ export const forjaApi = {
           notes: draft.newLoan.notes,
         })
       }
+      const existingIdx = inMemoryStore.transactions.findIndex((t) => t.id === id)
+      const existing = existingIdx >= 0 ? inMemoryStore.transactions[existingIdx] : null
       const tx: Transaction = {
         id,
         date: draft.date,
@@ -552,11 +554,10 @@ export const forjaApi = {
         debtId: draft.debtId,
         loanId: draft.loanId,
         meta: draft.meta as unknown as Record<string, unknown>,
-        clientRequestId,
-        createdAt: new Date().toISOString(),
+        clientRequestId: existing?.clientRequestId || clientRequestId,
+        createdAt: existing?.createdAt || new Date().toISOString(),
         postings: draft.postings,
       }
-      const existingIdx = inMemoryStore.transactions.findIndex((t) => t.id === id)
       if (existingIdx >= 0) inMemoryStore.transactions[existingIdx] = tx
       else inMemoryStore.transactions.unshift(tx)
       inMemoryStore.persist()

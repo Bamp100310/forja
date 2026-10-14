@@ -32,10 +32,14 @@ async function setupTestDb() {
     grant select on auth.users to authenticated;
   `)
 
-  // Leer y ejecutar la migración oficial del proyecto
-  const migrationPath = resolve(process.cwd(), 'supabase/migrations/20261011000000_init_forja.sql')
-  const migrationSql = readFileSync(migrationPath, 'utf8')
-  await db.exec(migrationSql)
+  // Leer y ejecutar las migraciones en orden correlativo
+  const migrationPath1 = resolve(process.cwd(), 'supabase/migrations/20261011000000_init_forja.sql')
+  const migrationSql1 = readFileSync(migrationPath1, 'utf8')
+  await db.exec(migrationSql1)
+
+  const migrationPath2 = resolve(process.cwd(), 'supabase/migrations/20261013000000_update_save_transaction_atomic.sql')
+  const migrationSql2 = readFileSync(migrationPath2, 'utf8')
+  await db.exec(migrationSql2)
 
   // Otorgar permisos al rol autenticado sobre el esquema público
   await db.exec(`
@@ -300,5 +304,78 @@ describe('Integración PostgreSQL + RLS con PGlite', () => {
     // Comprobar totales agregados
     const totals = await db.query(`select * from public.ledger_target_totals where target_id = '${loanUuid}';`)
     expect(Number(totals.rows[0].total)).toBe(87400)
+  })
+
+  it('save_transaction_atomic actualiza atómicamente una transacción existente respetando su ID y reemplazando sus asientos', async () => {
+    const db = await setupTestDb()
+
+    await asUser(db, USER_1)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    const catRes = await db.query(`select id from public.categories where user_id = '${USER_1}' and kind = 'expense' limit 1;`)
+    const cat = catRes.rows[0].id
+
+    const accInsert = await db.query(`
+      insert into public.accounts (user_id, name, kind, opening_balance, opening_date)
+      values ('${USER_1}', 'Caja Taller', 'cash', 200000, '2026-09-01')
+      returning id;
+    `)
+    const acc = accInsert.rows[0].id
+    const origUuid = '55555555-5555-4555-a555-555555555555'
+
+    // 1. Crear transacción original
+    const txPayload1 = JSON.stringify({
+      id: origUuid,
+      date: '2026-10-10',
+      kind: 'expense',
+      description: 'Compra repuesto inicial',
+      client_request_id: 'req-init-1',
+    })
+    const postings1 = JSON.stringify([
+      { target_type: 'category', target_id: cat, amount: 40000, role: 'payment' },
+      { target_type: 'account', target_id: acc, amount: -40000, role: 'payment' },
+    ])
+
+    const res1 = await db.query(`select public.save_transaction_atomic($1::jsonb, $2::jsonb, null) as res;`, [
+      txPayload1,
+      postings1,
+    ])
+    expect((res1.rows[0].res as { id: string }).id).toBe(origUuid)
+
+    // Verificar total inicial
+    const tot1 = await db.query(`select total from public.ledger_target_totals where target_id = '${acc}';`)
+    expect(Number(tot1.rows[0].total)).toBe(-40000)
+
+    // 2. Modificar la transacción existente (mismo id, nuevo client_request_id, nuevo importe $70.000)
+    const txPayload2 = JSON.stringify({
+      id: origUuid,
+      date: '2026-10-12',
+      kind: 'expense',
+      description: 'Compra repuesto modificado',
+      client_request_id: 'req-edit-2',
+    })
+    const postings2 = JSON.stringify([
+      { target_type: 'category', target_id: cat, amount: 70000, role: 'payment' },
+      { target_type: 'account', target_id: acc, amount: -70000, role: 'payment' },
+    ])
+
+    const res2 = await db.query(`select public.save_transaction_atomic($1::jsonb, $2::jsonb, null) as res;`, [
+      txPayload2,
+      postings2,
+    ])
+    expect((res2.rows[0].res as { id: string }).id).toBe(origUuid)
+
+    // 3. Verificar que solo hay 2 asientos (los viejos fueron eliminados y reemplazados)
+    const count = await db.query(`select count(*) as c from public.postings where transaction_id = '${origUuid}';`)
+    expect(Number(count.rows[0].c)).toBe(2)
+
+    // 4. Verificar total actualizado en el ledger (-70.000)
+    const tot2 = await db.query(`select total from public.ledger_target_totals where target_id = '${acc}';`)
+    expect(Number(tot2.rows[0].total)).toBe(-70000)
+
+    // 5. Verificar descripción y fecha actualizadas
+    const txRow = await db.query(`select description, date from public.transactions where id = '${origUuid}';`)
+    expect(txRow.rows[0].description).toBe('Compra repuesto modificado')
+    expect(new Date(txRow.rows[0].date).toISOString().slice(0, 10)).toBe('2026-10-12')
   })
 })

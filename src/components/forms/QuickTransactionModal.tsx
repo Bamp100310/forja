@@ -5,15 +5,41 @@ import { PixelSprite } from '../common/PixelSprite'
 import { useForja } from '../../context/ForjaContext'
 import { MoneyInput } from './MoneyInput'
 import { buildTransactionDraft, type OperationInput } from '../../domain/ledger/operations'
-import type { TransactionKind } from '../../domain/types'
+import { TRANSACTION_KIND_LABELS, type TransactionKind } from '../../domain/types'
 import { generateUUID } from '../../domain/uuid'
 import { sound } from '../../services/sound'
 import { triggerPixelSparks } from '../common/PixelSparks'
+
+interface TxMetaDetails {
+  amount?: number
+  commission?: number
+  tip?: number
+  fee?: number
+  fees?: number
+  principal?: number
+  interest?: number
+  categoryId?: string
+  accountId?: string
+  fromAccountId?: string
+  toAccountId?: string
+  debtId?: string
+  loanId?: string
+  payment?: {
+    method?: string
+    accountId?: string
+    debtId?: string
+  }
+  newLoan?: {
+    personName?: string
+    dueDate?: string
+  }
+}
 
 export const QuickTransactionModal: React.FC = () => {
   const {
     quickModalOpen,
     quickModalKind,
+    editingTransaction,
     closeQuickModal,
     saveTransaction,
     today,
@@ -59,48 +85,130 @@ export const QuickTransactionModal: React.FC = () => {
 
   useEffect(() => {
     if (quickModalOpen) {
-      setKind(quickModalKind)
-      setDate(today)
       setErrorMessage(null)
-      setDescription('')
-      setNotes('')
-      setAmount(0)
-      setCommission(0)
-      setTip(0)
-      setFee(0)
-      setPrincipal(0)
-      setInterest(0)
-      setDebtFees(0)
-      setLoanPersonName('')
-      setLoanDueDate('')
 
-      // Seleccionar valores por defecto razonables
-      const incCats = categories.filter((c) => c.kind === 'income' && !c.isArchived)
-      const expCats = categories.filter((c) => c.kind === 'expense' && !c.isArchived)
-      if (quickModalKind === 'income' && incCats.length > 0) {
-        setCategoryId(incCats[0].id)
-        setIsMoto(Boolean(incCats[0].isMoto))
-      } else if (quickModalKind === 'expense' && expCats.length > 0) {
-        setCategoryId(expCats[0].id)
-        setIsMoto(Boolean(expCats[0].isMoto))
-      }
+      if (editingTransaction) {
+        // Pre-cargar valores de la transacción en edición
+        setKind(editingTransaction.kind)
+        setDate(editingTransaction.date)
+        setDescription(editingTransaction.description)
+        setNotes(editingTransaction.notes || '')
+        setIsMoto(Boolean(editingTransaction.isMoto))
 
-      if (accounts.length > 0) {
-        setAccountId(accounts[0].id)
-        if (accounts.length > 1) setToAccountId(accounts[1].id)
-      }
-      if (debts.length > 0) setDebtId(debts[0].id)
-      else setDebtId('')
+        const meta = (editingTransaction.meta || {}) as TxMetaDetails
 
-      if (quickModalKind === 'loan_given') {
-        setLoanId(loans.length > 0 ? loans[0].id : '__new__')
-      } else if (quickModalKind === 'loan_repayment') {
-        setLoanId(loans.length > 0 ? loans[0].id : '')
+        if (editingTransaction.kind === 'income') {
+          const catPosting = editingTransaction.postings.find((p) => p.targetType === 'category' && p.role === 'gross')
+          const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const commPosting = editingTransaction.postings.find((p) => p.role === 'commission')
+          const tipPosting = editingTransaction.postings.find((p) => p.role === 'tip')
+
+          setAmount(Number(meta.amount ?? (catPosting ? Math.abs(catPosting.amount) : 0)))
+          setCommission(Number(meta.commission ?? (commPosting ? commPosting.amount : 0)))
+          setTip(Number(meta.tip ?? (tipPosting ? Math.abs(tipPosting.amount) : 0)))
+          setCategoryId(meta.categoryId || catPosting?.targetId || categories.find((c) => c.kind === 'income')?.id || '')
+          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+        } else if (editingTransaction.kind === 'expense') {
+          const catPosting = editingTransaction.postings.find((p) => p.targetType === 'category')
+          const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const debtPosting = editingTransaction.postings.find((p) => p.targetType === 'debt')
+
+          setAmount(Number(meta.amount ?? (catPosting ? Math.abs(catPosting.amount) : 0)))
+          setCategoryId(meta.categoryId || catPosting?.targetId || categories.find((c) => c.kind === 'expense')?.id || '')
+          if (meta.payment?.method === 'debt' || debtPosting || editingTransaction.debtId) {
+            setPaymentMethod('debt')
+            setDebtId(meta.payment?.debtId || debtPosting?.targetId || editingTransaction.debtId || debts[0]?.id || '')
+            if (accPosting) setAccountId(accPosting.targetId || '')
+            else if (accounts.length > 0) setAccountId(accounts[0].id)
+          } else {
+            setPaymentMethod('account')
+            setAccountId(meta.payment?.accountId || accPosting?.targetId || accounts[0]?.id || '')
+            if (debts.length > 0) setDebtId(debts[0].id)
+          }
+        } else if (editingTransaction.kind === 'transfer') {
+          const srcPosting = editingTransaction.postings.find((p) => p.targetType === 'account' && p.amount < 0)
+          const dstPosting = editingTransaction.postings.find((p) => p.targetType === 'account' && p.amount > 0)
+          const feePosting = editingTransaction.postings.find((p) => p.role === 'fee')
+
+          setAmount(Number(meta.amount ?? (dstPosting ? dstPosting.amount : 0)))
+          setFee(Number(meta.fee ?? (feePosting ? feePosting.amount : 0)))
+          setAccountId(meta.fromAccountId || srcPosting?.targetId || accounts[0]?.id || '')
+          setToAccountId(meta.toAccountId || dstPosting?.targetId || accounts[1]?.id || '')
+        } else if (editingTransaction.kind === 'debt_payment') {
+          const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const debtPosting = editingTransaction.postings.find((p) => p.targetType === 'debt')
+          const intPosting = editingTransaction.postings.find((p) => p.role === 'interest')
+          const feePosting = editingTransaction.postings.find((p) => p.role === 'fee')
+
+          setPrincipal(Number(meta.principal ?? (debtPosting ? debtPosting.amount : 0)))
+          setInterest(Number(meta.interest ?? (intPosting ? intPosting.amount : 0)))
+          setDebtFees(Number(meta.fees ?? (feePosting ? feePosting.amount : 0)))
+          setDebtId(meta.debtId || debtPosting?.targetId || editingTransaction.debtId || debts[0]?.id || '')
+          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+        } else if (editingTransaction.kind === 'loan_given') {
+          const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan')
+          const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const targetLoan = loans.find((l) => l.id === (meta.loanId || editingTransaction.loanId || loanPosting?.targetId))
+
+          setAmount(Number(meta.amount ?? (loanPosting ? loanPosting.amount : 0)))
+          setLoanId(targetLoan ? targetLoan.id : (meta.loanId || editingTransaction.loanId || '__new__'))
+          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+          setLoanPersonName(targetLoan?.personName || meta.newLoan?.personName || '')
+          setLoanDueDate(targetLoan?.dueDate || meta.newLoan?.dueDate || '')
+        } else if (editingTransaction.kind === 'loan_repayment') {
+          const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan')
+          const intPosting = editingTransaction.postings.find((p) => p.role === 'interest')
+
+          setPrincipal(Number(meta.principal ?? (loanPosting ? Math.abs(loanPosting.amount) : 0)))
+          setInterest(Number(meta.interest ?? (intPosting ? Math.abs(intPosting.amount) : 0)))
+          setLoanId(meta.loanId || loanPosting?.targetId || editingTransaction.loanId || (loans[0]?.id ?? ''))
+          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+        }
       } else {
-        setLoanId(loans.length > 0 ? loans[0].id : '__new__')
+        // Inicialización habitual para nuevo movimiento
+        setKind(quickModalKind)
+        setDate(today)
+        setDescription('')
+        setNotes('')
+        setAmount(0)
+        setCommission(0)
+        setTip(0)
+        setFee(0)
+        setPrincipal(0)
+        setInterest(0)
+        setDebtFees(0)
+        setLoanPersonName('')
+        setLoanDueDate('')
+
+        // Seleccionar valores por defecto razonables
+        const incCats = categories.filter((c) => c.kind === 'income' && !c.isArchived)
+        const expCats = categories.filter((c) => c.kind === 'expense' && !c.isArchived)
+        if (quickModalKind === 'income' && incCats.length > 0) {
+          setCategoryId(incCats[0].id)
+          setIsMoto(Boolean(incCats[0].isMoto))
+        } else if (quickModalKind === 'expense' && expCats.length > 0) {
+          setCategoryId(expCats[0].id)
+          setIsMoto(Boolean(expCats[0].isMoto))
+        }
+
+        if (accounts.length > 0) {
+          setAccountId(accounts[0].id)
+          if (accounts.length > 1) setToAccountId(accounts[1].id)
+        }
+        if (debts.length > 0) setDebtId(debts[0].id)
+        else setDebtId('')
+
+        if (quickModalKind === 'loan_given') {
+          setLoanId(loans.length > 0 ? loans[0].id : '__new__')
+        } else if (quickModalKind === 'loan_repayment') {
+          setLoanId(loans.length > 0 ? loans[0].id : '')
+        } else {
+          setLoanId(loans.length > 0 ? loans[0].id : '__new__')
+        }
       }
     }
-  }, [quickModalOpen, quickModalKind, today, categories, accounts, debts, loans])
+  }, [quickModalOpen, quickModalKind, editingTransaction, today, categories, accounts, debts, loans])
 
   const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value
@@ -316,7 +424,7 @@ export const QuickTransactionModal: React.FC = () => {
       }
 
       const draft = buildTransactionDraft(op, { categories })
-      await saveTransaction(draft)
+      await saveTransaction(draft, editingTransaction ? editingTransaction.id : undefined)
 
       // Feedback audiovisual confirmado tras persistencia exitosa
       if (kind === 'income' || kind === 'loan_repayment') {
@@ -349,7 +457,7 @@ export const QuickTransactionModal: React.FC = () => {
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#233a30]">
             <Dialog.Title className="font-stencil text-base text-emerald-400 font-bold flex items-center gap-2 tracking-wide">
               <PixelSprite name="tools" size={20} />
-              <span>FORJAR MOVIMIENTO</span>
+              <span>{editingTransaction ? 'MODIFICAR MOVIMIENTO' : 'FORJAR MOVIMIENTO'}</span>
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -360,6 +468,13 @@ export const QuickTransactionModal: React.FC = () => {
               </button>
             </Dialog.Close>
           </div>
+
+          {editingTransaction && (
+            <div className="mt-3 bg-amber-950/40 border border-amber-600/60 text-amber-300 px-3 py-1.5 rounded-xs text-[11px] font-pixel flex items-center justify-between">
+              <span>MODO EDICIÓN: Ref. #{editingTransaction.id.slice(0, 8)}</span>
+              <span className="font-stencil uppercase text-[10px] text-amber-400">{TRANSACTION_KIND_LABELS[editingTransaction.kind]}</span>
+            </div>
+          )}
 
           {/* Selector de pestañas por tipo de operación con PixelSprites auténticos */}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 my-3.5 bg-[#070c0a] p-1.5 rounded-xs border-2 border-[#233a30]">
@@ -960,7 +1075,13 @@ export const QuickTransactionModal: React.FC = () => {
                 }`}
               >
                 <PixelSprite name="tools" size={17} className={isSubmitting ? 'animate-spin' : ''} />
-                <span>{isSubmitting ? '¡FORJANDO EN EL YUNQUE!' : 'FORJAR MOVIMIENTO'}</span>
+                <span>
+                  {isSubmitting
+                    ? '¡FORJANDO EN EL YUNQUE!'
+                    : editingTransaction
+                    ? 'GUARDAR MODIFICACIONES'
+                    : 'FORJAR MOVIMIENTO'}
+                </span>
               </button>
             </div>
           </form>

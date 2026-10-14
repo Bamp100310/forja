@@ -39,7 +39,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           // Solo recursos estáticos del build. Las respuestas de Supabase (datos
           // financieros privados) NUNCA se guardan en caché.
-          globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+          globPatterns: ['**/*.{js,css,html,svg,png,webp,woff,woff2}'],
           navigateFallback: 'index.html',
           runtimeCaching: [],
           cleanupOutdatedCaches: true,

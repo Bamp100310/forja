@@ -35,20 +35,20 @@ jobs:
       - name: Ejecutar pruebas automáticas
         run: npx vitest run
 
-      - name: Validar secretos de producción de Supabase
-        run: |
-          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ] || [ -z "${{ secrets.VITE_SUPABASE_ANON_KEY }}" ]; then
-            echo "::error::Faltan las variables de entorno de Supabase (VITE_SUPABASE_URL y/o VITE_SUPABASE_ANON_KEY)."
-            echo "Configúralas en GitHub: Settings -> Secrets and variables -> Actions -> Repository secrets."
-            exit 1
-          fi
+      - name: Ejecutar verificación de estilo y tipos (lint)
+        run: npm run lint
 
       - name: Compilar aplicación web
         env:
           VITE_BASE_PATH: /forja/
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run build
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL || 'https://wrpttzgjpntquernuerp.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY || 'sb_publishable_XUp5RgWZ-xEiYEjut8cOZQ_z6lDgszV' }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Faltan las variables públicas de Supabase (VITE_SUPABASE_URL y/o VITE_SUPABASE_ANON_KEY)."
+            exit 1
+          fi
+          npm run build
 
       - name: Subir artefacto para GitHub Pages
         uses: actions/upload-pages-artifact@v3

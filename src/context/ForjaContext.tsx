@@ -90,11 +90,17 @@ interface ForjaContextType {
   deleteGoal: (id: string) => Promise<void>
   updateProfile: (updates: Partial<Profile>) => Promise<void>
 
-  // Control del modal de registro rápido
+  // Control del modal de registro y edición rápida
   quickModalOpen: boolean
   quickModalKind: TransactionKind
-  openQuickModal: (kind?: TransactionKind) => void
+  editingTransaction: Transaction | null
+  openQuickModal: (kind?: TransactionKind, editingTx?: Transaction | null) => void
   closeQuickModal: () => void
+
+  // Control del modal de detalle de movimiento
+  detailModalTx: Transaction | null
+  openTransactionDetail: (tx: Transaction) => void
+  closeTransactionDetail: () => void
 }
 
 const ForjaContext = createContext<ForjaContextType | null>(null)
@@ -121,17 +127,29 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
 
-  // Modal rápido
+  // Modal de detalle de movimiento
+  const [detailModalTx, setDetailModalTx] = useState<Transaction | null>(null)
+  const openTransactionDetail = useCallback((tx: Transaction) => {
+    setDetailModalTx(tx)
+  }, [])
+  const closeTransactionDetail = useCallback(() => {
+    setDetailModalTx(null)
+  }, [])
+
+  // Modal rápido y de edición
   const [quickModalOpen, setQuickModalOpen] = useState(false)
   const [quickModalKind, setQuickModalKind] = useState<TransactionKind>('income')
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
 
-  const openQuickModal = useCallback((kind: TransactionKind = 'income') => {
+  const openQuickModal = useCallback((kind: TransactionKind = 'income', editingTx: Transaction | null = null) => {
     setQuickModalKind(kind)
+    setEditingTransaction(editingTx)
     setQuickModalOpen(true)
   }, [])
 
   const closeQuickModal = useCallback(() => {
     setQuickModalOpen(false)
+    setEditingTransaction(null)
   }, [])
 
   const refreshData = useCallback(async () => {
@@ -541,8 +559,12 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateProfile,
         quickModalOpen,
         quickModalKind,
+        editingTransaction,
         openQuickModal,
         closeQuickModal,
+        detailModalTx,
+        openTransactionDetail,
+        closeTransactionDetail,
       }}
     >
       {children}

@@ -71,7 +71,7 @@ const KIND_LABELS: Record<TransactionKind, { label: string; badgeClass: string; 
 }
 
 export const OperationalLogbook: React.FC = () => {
-  const { transactions, period, index, openQuickModal } = useForja()
+  const { transactions, period, index, openQuickModal, openTransactionDetail } = useForja()
 
   // Movimientos recientes del corte
   const periodTxs = transactions
@@ -124,7 +124,17 @@ export const OperationalLogbook: React.FC = () => {
             return (
               <div
                 key={tx.id}
-                className="bg-[#0f1715] hover:bg-[#15231f] border border-[#213730] hover:border-[#2d4d42] p-2.5 sm:p-3 transition-colors flex items-center justify-between gap-3 shadow-xs"
+                onClick={() => openTransactionDetail(tx)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    openTransactionDetail(tx)
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                title="Inspeccionar detalle y asientos contables"
+                className="bg-[#0f1715] hover:bg-[#152722] border border-[#213730] hover:border-emerald-600/50 p-2.5 sm:p-3 transition-all flex items-center justify-between gap-3 shadow-xs cursor-pointer group rounded-xs"
               >
                 {/* Lado izquierdo: Icono de tipo + Detalles */}
                 <div className="flex items-center gap-3 min-w-0">

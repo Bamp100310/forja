@@ -12,6 +12,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useForja } from '../../context/ForjaContext'
 import { PeriodNavigator } from '../common/PeriodNavigator'
 import { QuickTransactionModal } from '../forms/QuickTransactionModal'
+import { TransactionDetailModal } from '../forms/TransactionDetailModal'
 import { PixelSprite, type PixelSpriteName } from '../common/PixelSprite'
 import { sound } from '../../services/sound'
 import { triggerButtonSparks } from '../common/PixelSparks'
@@ -356,6 +357,7 @@ export const AppLayout: React.FC = () => {
 
       {/* MODAL GLOBAL DE MOVIMIENTO */}
       <QuickTransactionModal />
+      <TransactionDetailModal />
     </div>
   )
 }

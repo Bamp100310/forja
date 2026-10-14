@@ -1,16 +1,16 @@
 import React, { useState } from 'react'
-import { Plus, Check, X, Trash2 } from 'lucide-react'
+import { Plus, Check, X, Trash2, Pencil, AlertCircle } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { formatCOP } from '../domain/money'
 import { formatShortDate } from '../domain/dates'
 import { buildRecurringSchedule, OCCURRENCE_STATE_LABELS } from '../domain/recurring'
 import { buildTransactionDraft } from '../domain/ledger/operations'
 import { MoneyInput } from '../components/forms/MoneyInput'
-import { FREQUENCY_LABELS, type RecurringFrequency } from '../domain/types'
+import { FREQUENCY_LABELS, type RecurringExpense, type RecurringFrequency } from '../domain/types'
 import { PixelSprite } from '../components/common/PixelSprite'
 import { EmptyState } from '../components/common/EmptyState'
 import { sound } from '../services/sound'
-import { triggerPixelSparks } from '../components/common/PixelSparks'
+import { triggerPixelSparks, triggerButtonSparks } from '../components/common/PixelSparks'
 
 export const RecurringPage: React.FC = () => {
   const {
@@ -26,36 +26,92 @@ export const RecurringPage: React.FC = () => {
   } = useForja()
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null)
   const [name, setName] = useState('')
   const [amount, setAmount] = useState<number>(0)
   const [categoryId, setCategoryId] = useState('')
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly')
   const [anchorDate, setAnchorDate] = useState(today)
   const [accountId, setAccountId] = useState('')
+  const [status, setStatus] = useState<RecurringExpense['status']>('active')
+  const [notes, setNotes] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const handleCreateRecurring = async (e: React.FormEvent) => {
+  const handleOpenCreate = (e?: React.MouseEvent<HTMLElement>) => {
+    sound.playClick()
+    if (e) triggerButtonSparks(e, 'forge', 18)
+    setEditingRecurring(null)
+    setName('')
+    setAmount(0)
+    setCategoryId(categories.find((c) => c.kind === 'expense')?.id || '')
+    setFrequency('monthly')
+    setAnchorDate(today)
+    setAccountId(accounts[0]?.id || '')
+    setStatus('active')
+    setNotes('')
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleOpenEdit = (rec: RecurringExpense) => {
+    sound.playClick()
+    setEditingRecurring(rec)
+    setName(rec.name)
+    setAmount(rec.amount)
+    setCategoryId(rec.categoryId)
+    setFrequency(rec.frequency)
+    setAnchorDate(rec.anchorDate)
+    setAccountId(rec.paymentAccountId || accounts[0]?.id || '')
+    setStatus(rec.status)
+    setNotes(rec.notes || '')
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    if (isSubmitting) return
+    sound.playClick()
+    setModalOpen(false)
+    setEditingRecurring(null)
+    setErrorMessage(null)
+  }
+
+  const handleSubmitRecurring = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!name.trim()) {
+      setErrorMessage('El nombre del gasto recurrente es obligatorio.')
+      return
+    }
+    if (amount <= 0) {
+      setErrorMessage('El importe previsto debe ser mayor a cero.')
+      return
+    }
+    setIsSubmitting(true)
+    setErrorMessage(null)
     try {
       await saveRecurring({
+        ...(editingRecurring ? { id: editingRecurring.id } : {}),
         name: name.trim(),
         amount,
         categoryId: categoryId || categories.find((c) => c.kind === 'expense')?.id || '',
         frequency,
         anchorDate,
-        endDate: null,
+        endDate: editingRecurring ? editingRecurring.endDate : null,
         paymentAccountId: accountId || accounts[0]?.id || null,
-        paymentDebtId: null,
-        status: 'active',
-        notes: null,
+        paymentDebtId: editingRecurring ? editingRecurring.paymentDebtId : null,
+        status: editingRecurring ? status : 'active',
+        notes: notes.trim() || null,
       })
       sound.playConfirm()
       triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.45, 'amber', 14)
       setModalOpen(false)
-      setName('')
-      setAmount(0)
+      setEditingRecurring(null)
     } catch (err) {
       sound.playError()
-      alert((err as Error).message)
+      setErrorMessage((err as Error).message || 'Error al persistir el gasto fijo')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -143,14 +199,7 @@ export const RecurringPage: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              if (categories.length > 0) {
-                const exp = categories.find((c) => c.kind === 'expense')
-                if (exp) setCategoryId(exp.id)
-              }
-              if (accounts.length > 0) setAccountId(accounts[0].id)
-              setModalOpen(true)
-            }}
+            onClick={handleOpenCreate}
             className="btn-game btn-game-primary text-xs py-2 px-3.5 flex items-center gap-2 cursor-pointer font-pixel font-bold"
           >
             <Plus size={15} />
@@ -165,14 +214,7 @@ export const RecurringPage: React.FC = () => {
           title="Sin gastos fijos programados"
           description="Programa cuentas fijas mensuales como seguros, plan de celular, SOAT o arriendo del taller."
           actionLabel="+ PROGRAMAR PRIMER GASTO FIJO"
-          onAction={() => {
-            if (categories.length > 0) {
-              const exp = categories.find((c) => c.kind === 'expense')
-              if (exp) setCategoryId(exp.id)
-            }
-            if (accounts.length > 0) setAccountId(accounts[0].id)
-            setModalOpen(true)
-          }}
+          onAction={handleOpenCreate}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -201,6 +243,14 @@ export const RecurringPage: React.FC = () => {
                       <span className="badge-pixel text-[9px] bg-sky-950/80 text-sky-300 border-sky-800 px-2 py-0.5">
                         {rec.status.toUpperCase()}
                       </span>
+                      <button
+                        onClick={() => handleOpenEdit(rec)}
+                        className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-[#102422] transition-colors cursor-pointer"
+                        title="Modificar gasto fijo"
+                        aria-label="Modificar gasto fijo"
+                      >
+                        <Pencil size={13} />
+                      </button>
                       <button
                         onClick={() => handleDeleteRecurring(rec.id, rec.name)}
                         className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
@@ -285,7 +335,7 @@ export const RecurringPage: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL NUEVA RECURRENCIA */}
+      {/* MODAL NUEVA / EDITAR RECURRENCIA */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-sky-800/80 shadow-2xl">
@@ -293,17 +343,30 @@ export const RecurringPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <PixelSprite name="conveyor" size={20} />
                 <h3 className="font-stencil text-base text-sky-400 font-bold tracking-wide">
-                  PROGRAMAR CICLO RECURRENTE
+                  {editingRecurring ? 'MODIFICAR GASTO FIJO RECURRENTE' : 'PROGRAMAR CICLO RECURRENTE'}
                 </h3>
               </div>
               <button
-                onClick={() => setModalOpen(false)}
+                onClick={handleCloseModal}
+                disabled={isSubmitting}
                 className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#15252b] border border-transparent hover:border-[#25424d] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
-            <form onSubmit={handleCreateRecurring} className="space-y-3.5 text-xs">
+
+            {errorMessage && (
+              <div className="flex items-start gap-2 bg-rose-950/80 border border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel mb-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <div className="bg-[#0b161c] border border-sky-900/60 p-2.5 rounded-xs text-[11px] font-pixel text-sky-300 mb-3 leading-relaxed">
+              Las modificaciones se aplican a los próximos cobros y proyecciones. Los movimientos históricos ya pagados y asentados en el libro contable se conservan intactos.
+            </div>
+
+            <form onSubmit={handleSubmitRecurring} className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                   NOMBRE DE LA OBLIGACIÓN
@@ -394,16 +457,51 @@ export const RecurringPage: React.FC = () => {
                 </div>
               </div>
 
+              {editingRecurring && (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    ESTADO DE LA RECURRENCIA
+                  </label>
+                  <select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as RecurringExpense['status'])}
+                    className="w-full bg-[#080d0c] border border-[#213731] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="active">Activa (genera cobros cíclicos)</option>
+                    <option value="paused">Pausada temporalmente</option>
+                    <option value="cancelled">Cancelada / Finalizada</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                  NOTAS OPERATIVAS (OPCIONAL)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles sobre número de contrato, enlaces de pago..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full bg-[#080d0c] border border-[#213731] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
               <div className="flex justify-end gap-2.5 pt-3.5 border-t-2 border-[#1c2d33]">
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
                   className="btn-game btn-game-secondary text-xs py-2 px-3.5 font-pixel"
                 >
                   CANCELAR
                 </button>
-                <button type="submit" className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold">
-                  GUARDAR RECURRENCIA
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold flex items-center gap-2"
+                >
+                  <span>{isSubmitting ? 'GUARDANDO...' : (editingRecurring ? 'GUARDAR MODIFICACIONES' : 'GUARDAR RECURRENCIA')}</span>
                 </button>
               </div>
             </form>

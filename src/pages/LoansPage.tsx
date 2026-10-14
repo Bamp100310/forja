@@ -1,16 +1,76 @@
-import React from 'react'
-import { Plus, Calendar, Trash2 } from 'lucide-react'
+import React, { useState } from 'react'
+import { Plus, Calendar, Trash2, Pencil, X, AlertCircle } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { formatCOP } from '../domain/money'
 import { formatShortDate } from '../domain/dates'
 import { summarizeLoan, LOAN_STATUS_LABELS } from '../domain/loans'
+import { type Loan } from '../domain/types'
 import { PixelSprite } from '../components/common/PixelSprite'
 import { EmptyState } from '../components/common/EmptyState'
 import { sound } from '../services/sound'
-import { triggerButtonSparks } from '../components/common/PixelSparks'
+import { triggerButtonSparks, triggerPixelSparks } from '../components/common/PixelSparks'
 
 export const LoansPage: React.FC = () => {
-  const { loans, transactions, balances, today, deleteLoan, openQuickModal } = useForja()
+  const { loans, transactions, balances, today, saveLoan, deleteLoan, openQuickModal } = useForja()
+
+  const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
+  const [personName, setPersonName] = useState('')
+  const [startDate, setStartDate] = useState(today)
+  const [dueDate, setDueDate] = useState('')
+  const [interestNote, setInterestNote] = useState('')
+  const [notes, setNotes] = useState('')
+  const [isArchived, setIsArchived] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const handleOpenEdit = (loan: Loan) => {
+    sound.playClick()
+    setEditingLoan(loan)
+    setPersonName(loan.personName)
+    setStartDate(loan.startDate)
+    setDueDate(loan.dueDate || '')
+    setInterestNote(loan.interestNote || '')
+    setNotes(loan.notes || '')
+    setIsArchived(Boolean(loan.isArchived))
+    setErrorMessage(null)
+  }
+
+  const handleCloseModal = () => {
+    if (isSubmitting) return
+    sound.playClick()
+    setEditingLoan(null)
+    setErrorMessage(null)
+  }
+
+  const handleSubmitLoan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!personName.trim()) {
+      setErrorMessage('El nombre del deudor es obligatorio.')
+      return
+    }
+    if (!editingLoan) return
+    setIsSubmitting(true)
+    setErrorMessage(null)
+    try {
+      await saveLoan({
+        id: editingLoan.id,
+        personName: personName.trim(),
+        startDate,
+        dueDate: dueDate || null,
+        interestNote: interestNote.trim() || null,
+        notes: notes.trim() || null,
+        isArchived,
+      })
+      sound.playConfirm()
+      triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.45, 'cyan', 14)
+      setEditingLoan(null)
+    } catch (err) {
+      sound.playError()
+      setErrorMessage((err as Error).message || 'Error al actualizar el préstamo')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   const handleDeleteLoan = async (id: string, personName: string) => {
     sound.playClick()
@@ -105,6 +165,11 @@ export const LoansPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      {loan.isArchived && (
+                        <span className="badge-pixel text-[8px] bg-slate-800 text-slate-400 border-slate-600 px-1">
+                          ARCHIVADO
+                        </span>
+                      )}
                       <span
                         className={`badge-pixel text-[9px] px-2 py-0.5 ${
                           summary.status === 'pagado'
@@ -118,6 +183,14 @@ export const LoansPage: React.FC = () => {
                       >
                         {LOAN_STATUS_LABELS[summary.status]}
                       </span>
+                      <button
+                        onClick={() => handleOpenEdit(loan)}
+                        className="p-1 rounded text-slate-400 hover:text-purple-300 hover:bg-purple-950/40 transition-colors cursor-pointer"
+                        title="Modificar préstamo"
+                        aria-label="Modificar préstamo"
+                      >
+                        <Pencil size={13} />
+                      </button>
                       <button
                         onClick={() => handleDeleteLoan(loan.id, loan.personName)}
                         className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
@@ -198,6 +271,134 @@ export const LoansPage: React.FC = () => {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* MODAL EDITAR PRÉSTAMO */}
+      {editingLoan && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-purple-800/80 shadow-2xl">
+            <div className="flex items-center justify-between pb-2.5 mb-3 border-b-2 border-[#2b1836]">
+              <div className="flex items-center gap-2">
+                <PixelSprite name="sack" size={20} />
+                <h3 className="font-stencil text-base text-purple-400 font-bold tracking-wide">
+                  MODIFICAR PRÉSTAMO POR COBRAR
+                </h3>
+              </div>
+              <button
+                onClick={handleCloseModal}
+                disabled={isSubmitting}
+                className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b1836] border border-transparent hover:border-[#4f2963] transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {errorMessage && (
+              <div className="flex items-start gap-2 bg-rose-950/80 border border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel mb-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitLoan} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                  DEUDOR / DESTINATARIO
+                </label>
+                <input
+                  type="text"
+                  value={personName}
+                  onChange={(e) => setPersonName(e.target.value)}
+                  required
+                  className="w-full bg-[#080d0c] border border-[#271d2b] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    FECHA DE ENTREGA
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    required
+                    className="w-full bg-[#080d0c] border border-[#271d2b] rounded-xs p-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    FECHA VENCIMIENTO
+                  </label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full bg-[#080d0c] border border-[#271d2b] rounded-xs p-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                  CONDICIÓN DE INTERESES / NOTA PACTADA
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. 5% de interés acordado, sin intereses, etc."
+                  value={interestNote}
+                  onChange={(e) => setInterestNote(e.target.value)}
+                  className="w-full bg-[#080d0c] border border-[#271d2b] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                  NOTAS OPERATIVAS (OPCIONAL)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles sobre el motivo o cuotas acordadas..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full bg-[#080d0c] border border-[#271d2b] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="loan-archived"
+                  checked={isArchived}
+                  onChange={(e) => setIsArchived(e.target.checked)}
+                  className="rounded-xs border border-[#271d2b] text-purple-500 bg-[#080d0c] cursor-pointer"
+                />
+                <label htmlFor="loan-archived" className="text-xs text-slate-300 font-pixel uppercase tracking-wider cursor-pointer font-bold select-none">
+                  Archivar préstamo (oculta de alertas activas sin borrar historial)
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3.5 border-t-2 border-[#2b1836]">
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
+                  className="btn-game btn-game-secondary text-xs py-2 px-3.5 font-pixel"
+                >
+                  CANCELAR
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold flex items-center gap-2"
+                >
+                  <span>{isSubmitting ? 'GUARDANDO...' : 'GUARDAR MODIFICACIONES'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

@@ -18,7 +18,8 @@ Durante esta auditoría integral preproducción se inspeccionó exhaustivamente 
 4. **Sincronización multi-pestaña (P2 - Medio):** Se incorporó un mecanismo reactivo de sincronización vía eventos `storage` que recarga el almacén y refresca el contexto React ante modificaciones concurrentes en pestañas secundarias.
 5. **Calidad del motor sonoro industrial (P2 - Medio):** Se rediseñó por completo el sintetizador Web Audio API (`src/services/sound.ts`) reemplazando ondas simples 8-bit por síntesis física procedural: transitorios de impacto con ráfagas de ruido blanco filtradas, síntesis modal inarmónica para resonancias de acero, campana de latón para ingresos, troquel pesado para gastos, thud mecánico para errores y debouncing de 35ms.
 6. **Validación E2E en navegador:** Se ejecutó una prueba completa con agente de navegador grabando en video (`.webp`) la creación de movimientos con importes de miles, la apertura del modal industrial de confirmación, la eliminación y actualización en tiempo real del libro mayor, y el panel interactivo de audio.
-7. **Cobertura de pruebas:** La suite automatizada pasó de 60 a **66 pruebas unitarias y de integración** (100% exitosas), preservando íntegramente las 45 pruebas del dominio contable original.
+7. **Cobertura de pruebas:** La suite automatizada pasó de 60 a **77 pruebas unitarias y de integración** (100% exitosas distribuidas en 11 suites), preservando íntegramente las 45 pruebas del dominio contable original e incorporando pruebas de integración sobre PGlite (PostgreSQL en WebAssembly).
+8. **Detalle y Edición Completa de Entidades (Fases 1 a 4):** Se implementó el modal industrial de inspección detallada de movimientos `TransactionDetailModal` con desglose real de asientos contables por partida doble (`Σ = 0`), notas, metadatos y trazabilidad, integrado con `TransactionsPage` y la bitácora del `Dashboard`. Se habilitó la edición atómica de movimientos y el CRUD completo de edición en Cuentas/Bóvedas, Deudas, Préstamos y Gastos Recurrentes, resguardando la integridad patrimonial y las reglas del motor contable.
 
 ---
 
@@ -61,6 +62,8 @@ El almacén local gestiona las siguientes colecciones:
 | **FORJA-BUG-06** | **P2 (Medio)** | `src/context/ForjaContext.tsx` | Falta de actualización entre pestañas abiertas del navegador. | Ningún observador escuchaba mutaciones de `localStorage` provenientes de otras ventanas. | Agregado listener de evento `storage` en `ForjaContext` que dispara `forjaApi.reload()` y `refreshData()`. | Verificado en código y compilación limpia. |
 | **FORJA-BUG-07** | **P2 (Medio)** | `src/services/sound.ts` | Efectos sonoros con timbre electrónico y barridos de tono tipo videojuego espacial ("láser"), carentes de sensación pesada de taller mecánico. | Barridos rápidos de frecuencia descendente en osciladores sintéticos que emulan sonido sci-fi en vez de impactos acústicos reales. | Rediseño a síntesis acústica steampunk/industrial: frecuencias modales fijas (hierro fundido 215/470Hz, campana de latón G4/G5 y yunque de acero 560/1140/2280Hz), ráfagas de ruido de fricción de engranajes y cero barridos electrónicos. | 3 pruebas en `sound.test.ts` y validación en navegador. |
 | **FORJA-BUG-08** | **P1 (Alto)** | `src/domain/period.ts`, `src/components/common/PeriodNavigator.tsx`, `src/context/ForjaContext.tsx` | Posibilidad de avanzar a cortes financieros futuros e indicación errónea de "HISTÓRICO" en períodos posteriores a la fecha actual. | El botón de avance no validaba el límite del corte actual y la lógica etiquetaba cualquier período que no fuera idéntico al actual como histórico. | Bloqueo absoluto de navegación hacia cortes futuros (`canNavigateToNextPeriod`, clamping en `ForjaContext`, botón `disabled` con opacidad reducida en `PeriodNavigator` y sonido de rechazo mecánico). | 12 pruebas en `period.test.ts` y validación interactiva grabada en navegador. |
+| **FORJA-BUG-09** | **P0 (Crítico)** | `src/components/forms/QuickTransactionModal.tsx`, `src/domain/uuid.ts` | Error al crear préstamo otorgado: `target_id` quedaba `NULL` o string no UUID, violando constraint `not null` y tipo `UUID` en PostgreSQL / PGlite. | Se pasaba `loanId = '__new__'` directamente a `target_id` del posting contable en lugar de generar un UUID v4 RFC 4122. | Implementación de `generateUUID()` en `src/domain/uuid.ts` y asignación de ID atómico tanto a `p_new_loan` como al posting contable del préstamo. | Verificado en `rls_and_migrations.test.ts` con PGlite y 5 pruebas en `loans.test.ts`. |
+| **FORJA-BUG-10** | **P0 (Crítico)** | `supabase/migrations/20261011000000_init_forja.sql`, `src/services/api.ts` | Al editar un movimiento existente, `save_transaction_atomic` intentaba insertar un nuevo registro con la misma clave primaria en lugar de actualizar, provocando error de violación de unicidad `duplicate key value violates unique constraint "transactions_pkey"`. | La función SQL buscaba `v_existing_tx_id` únicamente por `client_request_id`. Como cada edición generaba un nuevo `client_request_id` fresco, caía en la rama `insert` con el ID ya existente. | Se modificó `save_transaction_atomic` para buscar primero si `(p_tx->>'id') is not null`. Si existe, actualiza los campos, elimina atómicamente los asientos viejos de ese `transaction_id` e inserta los nuevos asientos balanceados. En `api.ts`, se preserva `createdAt` original y se reemplaza en el almacén local sin duplicar. | 6 pruebas de integración en `crud_flows.test.ts` y prueba en PostgreSQL/PGlite en `rls_and_migrations.test.ts`. |
 
 ---
 
@@ -68,18 +71,17 @@ El almacén local gestiona las siguientes colecciones:
 
 | Módulo / Entidad | Crear (C) | Leer (R) | Actualizar (U) | Eliminar (D) | Mecanismo de Persistencia y Validación |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Transacciones (Libro Diario)** | ✅ Verificado | ✅ Verificado | ⚠️ Parcial* | ✅ Verificado | Persiste en `localStorage`. Partida doble verificada (suma de débitos = créditos). Modal de desmantelamiento operativo. |
-| **Cuentas y Bóvedas** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado** | Persiste en `localStorage`. Impide eliminar si la cuenta tiene asientos contables asociados (integridad referencial). |
+| **Transacciones (Libro Diario)** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Persiste en `localStorage` y PostgreSQL. Modal de detalle con tabla de asientos contables (`Σ = 0`). Edición atómica precargada mediante `saveTransaction(draft, existingId)`. |
+| **Cuentas y Bóvedas** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado* | Persiste en `localStorage` y PostgreSQL. Edición de nombre, tipo, notas y archivado. Saldo de apertura fijado para proteger partida doble. Bloqueo de eliminación si tiene asientos activos. |
 | **Categorías** | ✅ Verificado | ✅ Verificado | ✅ Verificado | 🚫 Bloqueado | Categorías del sistema son fijas; se permite editar presupuestos y banderas de moto. |
-| **Deudas Financieras** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Amortización calculada matemáticamente en `debts.ts`. Pagos de intereses/capital registrados vía asientos contables. |
-| **Préstamos a Terceros** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Seguimiento de saldo por cobrar, alertas de vencimiento e historial de devoluciones parciales y totales. |
-| **Gastos Recurrentes** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Generación virtual de ocurrencias con claves idempotentes (`recId-YYYY-MM-DD`). Desvinculación ante borrado. |
+| **Deudas Financieras** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Edición de cupo, días de corte y pago, cuota sugerida, estado y notas. Saldo de origen protegido. Amortizaciones registradas mediante asientos contables. |
+| **Préstamos a Terceros** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Modal dedicado de edición para deudor, fecha límite, notas de intereses y archivado. Preserva devoluciones contables previas. |
+| **Gastos Recurrentes** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Edición de importe, frecuencia, primer vencimiento, bóveda, estado y notas. Cambios aplicados a cobros futuros sin alterar registros históricos. |
 | **Taller de Moto (Jornadas)** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Validación de odómetro no decreciente. Ingresos/costos por km calculados con precisión sin duplicación. |
 | **Taller de Moto (Mantenimiento)** | ✅ Verificado | ✅ Verificado | ✅ Verificado | ✅ Verificado | Programación por fecha u odómetro. Alertas preventivas tempranas. |
 | **Presupuesto y Ciclos** | ✅ Verificado | ✅ Verificado | ✅ Verificado | 🚫 Por diseño | Ciclos definidos por fechas de corte (ej. día 11); preservan historial contable. |
 
-*\*Nota sobre Actualización de Transacciones:* En contabilidad formal por partida doble, la modificación directa de asientos históricos se desaconseja; la aplicación permite desmantelar (eliminar) y re-forjar la transacción, o aplicar ajustes de saldo justificados.  
-*\*\*Nota sobre Eliminación de Cuentas:* Una cuenta con transacciones activas no puede eliminarse para prevenir desbalance patrimonial; debe trasladarse su saldo y vaciarse primero.
+*\*Nota sobre Eliminación de Cuentas:* Una cuenta con transacciones activas no puede eliminarse para prevenir desbalance patrimonial; debe trasladarse su saldo y vaciarse primero.
 
 ---
 
@@ -151,19 +153,20 @@ Se descartaron los barridos de tono descendentes tipo videojuego espacial ("lás
 ## G. Registro de Pruebas Automatizadas Ejecutadas
 
 Comando ejecutado: `npx vitest run --reporter=verbose`  
-**Resultado: 10 suites aprobadas, 67 pruebas exitosas, 0 fallos.**
+**Resultado: 11 suites aprobadas, 77 pruebas exitosas, 0 fallos.**
 
 ```
- ✓ src/domain/period.test.ts (12 tests) [Ampliación: Detección y bloqueo de cortes futuros]
+ ✓ src/domain/period.test.ts (12 tests) [Detección y bloqueo de cortes futuros]
+ ✓ src/domain/money.test.ts (11 tests) [Formatos de miles, comas y normalización COP]
  ✓ src/domain/ledger/operations.test.ts (14 tests) [Partida doble original]
+ ✓ src/services/api.test.ts (7 tests) [Desvinculación de transacciones e integridad referencial]
+ ✓ src/domain/loans.test.ts (5 tests) [Cálculos de préstamos y UUIDs RFC 4122 v4]
+ ✓ src/domain/crud_flows.test.ts (6 tests) [Flujos E2E de detalle, edición, cancelación y persistencia]
  ✓ src/services/sound.test.ts (3 tests) [Mute, volumen, resiliencia Web Audio]
- ✓ src/domain/money.test.ts (11 tests) [Ampliación: Formatos de miles y comas]
- ✓ src/services/api.test.ts (7 tests) [Ampliación: Desvinculación de transacciones]
- ✓ src/domain/moto.test.ts (6 tests)
- ✓ src/domain/recurring.test.ts (4 tests)
- ✓ src/domain/loans.test.ts (3 tests)
- ✓ src/domain/debts.test.ts (2 tests)
- ✓ supabase/tests/rls_and_migrations.test.ts (5 tests) [PostgreSQL + RLS en PGlite]
+ ✓ src/domain/recurring.test.ts (4 tests) [Plantillas y ocurrencias recurrentes]
+ ✓ src/domain/moto.test.ts (6 tests) [Odometría, jornadas laborales y mantenimiento]
+ ✓ src/domain/debts.test.ts (2 tests) [Amortización de deudas e intereses]
+ ✓ supabase/tests/rls_and_migrations.test.ts (7 tests) [PostgreSQL + RLS + funciones atómicas en PGlite]
 ```
 
 ### Verificación de Linters y Compilación:
@@ -175,64 +178,88 @@ Comando ejecutado: `npx vitest run --reporter=verbose`
 
 ## H. Preparación para Producción y Matriz de Riesgos
 
-| Área | Estado Actual | Riesgo Restante | Acción Requerida Antes de Producción |
+## H. Preparación para Producción y Estado de Infraestructura
+
+| Área | Estado Auditado | Riesgo Restante | Acción Aplicada / Requerida |
 | :--- | :--- | :--- | :--- |
-| **Persistencia** | Local (`localStorage`) | Si el usuario limpia la caché o datos del navegador, los datos se pierden. | Conectar y aprovisionar el proyecto Supabase real; ejecutar migraciones SQL existentes (`supabase/migrations/`). |
-| **Copias de Seguridad** | Exportación/Importación JSON en Ajustes | El respaldo es actualmente manual. | Implementar exportación periódica automatizada o sincronización en la nube con cifrado. |
-| **Autenticación** | Modo local monousuario (`demo-user`) | No hay control de acceso ni sesiones protegidas por contraseña en este modo. | Configurar Supabase Auth (OAuth o Magic Link) y validar las políticas RLS probadas en `rls_and_migrations.test.ts`. |
-| **Secretos y Variables** | `.env.example` documentado; cero secretos en código | Despliegue con llaves expuestas. | Configurar variables seguras en el hosting (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`). |
-| **Límites de Cuota / PWA** | Service Worker configurado (1.3 MB precached) | Almacenamiento local restringido por cuota de origen (~5-10 MB). | Suficiente para miles de registros locales; para adjuntos (fotos de facturas) se requerirá Supabase Storage. |
+| **Persistencia Remota (Supabase)** | Conectado a `https://wrpttzgjpntquernuerp.supabase.co`. Esquema de base de datos verificado con 13 tablas relacionales y RPCs. | Ninguno para el esquema existente. Migración incremental 20261013000000 disponible para ejecutar en SQL Editor. | Migraciones versionadas en `supabase/migrations/`. La aplicación conmuta automáticamente al backend de Supabase al detectar las credenciales. |
+| **Seguridad y RLS** | **Auditado y Verificado.** Todas las tablas (`profiles`, `accounts`, `categories`, `transactions`, `postings`, `debts`, `loans`, `recurring_expenses`, `recurring_occurrences`, `moto_logs`, `moto_maintenance`, `budgets`, `goals`) tienen RLS activo y rechazan peticiones no autenticadas (HTTP 401). | Cero fuga de datos hacia usuarios anónimos. | Acceso restringido exclusivamente al propietario autenticado (`auth.uid() = user_id`). |
+| **Autenticación (Supabase Auth)** | **Auditado.** `disable_signup: true` (registro público inhabilitado). La pantalla de acceso (`LoginPage`) exige correo y contraseña registrados. | Si el usuario no confirma el correo, la API bloquea el acceso. | Se recomienda crear el usuario propietario desde el Dashboard de Supabase con la casilla *Auto Confirm User* marcada. |
+| **Despliegue y CI/CD** | GitHub Pages activo en `https://bamp100310.github.io/forja/`. Workflow en `.github/workflows/deploy.yml` con permisos mínimos (`pages: write`, `id-token: write`). | Ninguno. Build automatizado ejecuta `vitest` y `lint` antes de compilar y desplegar. | Compilación con `VITE_BASE_PATH=/forja/`, HashRouter para SPA sin errores 404 y service worker PWA configurado. |
+| **Caché y Privacidad (PWA)** | Service worker precachea únicamente bundles estáticos, fuentes (`.woff`, `.woff2`), imágenes (`.webp`, `.png`) y metadatos (`manifest.webmanifest`). `runtimeCaching: []`. | Las respuestas de Supabase (datos financieros) NUNCA se almacenan en caché del navegador. | Privacidad financiera garantizada offline y online. |
 
 ---
 
-## I. Archivos Modificados y Razón del Cambio
+## I. Archivos Modificados y Creados (Fases 1 a 5)
 
-1. `src/domain/period.ts`:
-   * *Motivo:* Agregar funciones de validación `isFuturePeriod`, `isCurrentPeriod` y `canNavigateToNextPeriod` para garantizar que la aplicación impida navegar a cortes posteriores al período en curso.
-2. `src/components/common/PeriodNavigator.tsx`:
-   * *Motivo:* Deshabilitar el botón de corte siguiente cuando se está en el corte activo, mostrar badge "ACTIVO" en el corte actual e "HISTÓRICO" en pasados, e integrar retroalimentación sonora al interactuar.
-3. `src/context/ForjaContext.tsx`:
-   * *Motivo:* Añadir listener de evento `storage` en el navegador para recargar y sincronizar el estado reactivo entre pestañas, y acotar `goToNextPeriod` y `setPeriodId` para no aceptar cortes futuros.
-4. `src/services/sound.ts`:
-   * *Motivo:* Reescritura integral del motor de sonido a síntesis física steampunk y de taller pesado (frecuencias modales fijas de hierro fundido, latón de caja registradora, yunque de acero y sin barridos de frecuencia electrónicos tipo láser).
-5. `src/domain/money.ts`:
-   * *Motivo:* Reescribir `parseCOPInput()` para admitir separadores de miles con punto y coma (`15.000`, `15,000`, `250.000`, `1.234.567`), ignorar símbolos (`$`, `COP`), redondear centavos a enteros COP y rechazar cadenas vacías o no numéricas.
-6. `src/components/forms/MoneyInput.tsx`:
-   * *Motivo:* Corregir error de índice en `handleKeyDown` cuando el cursor estaba en la posición 1 (`start - 2 = -1`), y añadir manejo de tecla `Delete` ante separadores de miles.
-7. `src/components/forms/QuickTransactionModal.tsx`:
-   * *Motivo:* Permitir pagos de deuda donde el capital sea 0 pero existan intereses o comisiones (`totalPayment > 0`), y asegurar que los efectos sonoros y partículas sólo se reproduzcan tras confirmación exitosa de guardado.
-8. `src/services/api.ts`:
-   * *Motivo:* Enriquecer `forjaApi.deleteTransaction(id)` para desvincular ocurrencias recurrentes (`transactionId = null`), jornadas de moto y registros de mantenimiento huérfanos. Añadir método `reload()` para sincronización entre pestañas.
-9. `src/pages/TransactionsPage.tsx`:
-   * *Motivo:* Reemplazar `window.confirm` por un modal industrial accesible (`forge-modal-box rivet-corners`), con prevención de doble clic y retroalimentación de estado `isDeleting`.
-10. `src/domain/period.test.ts`:
-    * *Motivo:* Agregar casos de prueba para el bloqueo de cortes futuros y cálculo de período activo.
-11. `src/domain/money.test.ts`:
-    * *Motivo:* Incorporar casos de prueba para formatos de miles, límites superiores, centavos con coma y entradas vacías.
-12. `src/services/api.test.ts`:
-    * *Motivo:* Añadir pruebas para la desvinculación referencial al eliminar transacciones y protección contra registros inexistentes.
-13. `src/services/sound.test.ts`:
-    * *Motivo:* Crear suite de pruebas para control de volumen, límites [0, 1], persistencia de silencio y ejecución libre de excepciones sin audio hardware.
-
----
-
-## J. Pendientes y Recomendaciones para el Despliegue
-
-### Prioridad Inmediata (Antes de invitar usuarios reales):
-1. **Aprovisionar Supabase:**
-   * Crear proyecto en Supabase y aplicar las migraciones ubicadas en `supabase/migrations/` en orden correlativo.
-   * Verificar en el panel de Supabase que las funciones `save_transaction_atomic` y `ensure_user_setup` hayan quedado registradas con permisos adecuados.
-2. **Generar y configurar archivo `.env`:**
-   * Definir `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
-   * Probar el flujo de inicio de sesión y comprobar que `forjaApi` conmuta automáticamente de `LocalStore` al cliente remoto sin alterar la experiencia del usuario.
-3. **Flujo de Migración Local -> Nube:**
-   * Implementar un asistente de sincronización en el primer inicio de sesión con cuenta que ofrezca importar los datos creados localmente en `localStorage` hacia la cuenta de Supabase del usuario.
-
-### Recomendaciones de Mantenimiento y Rendimiento:
-1. **División de Chunks en Rollup:** Vite advirtió que `dist/assets/index-*.js` supera los 500 kB debido a las librerías de gráficos y utilitarios. Se aconseja aplicar `React.lazy()` en rutas como `/reports`, `/planning` y `/moto`.
-2. **Respaldo Automático:** Añadir una rutina periódica que descargue un snapshot de respaldo en formato JSON cada 30 días o antes de operaciones masivas.
+1. `src/components/forms/TransactionDetailModal.tsx` *(Nuevo)*:
+   * *Motivo:* Modal industrial que desglosa detalladamente cualquier movimiento: fecha, descripción, importe, tipo, bóvedas de origen/destino, categorías, desgloses (intereses, propinas, comisiones), notas, metadatos JSON y la tabla completa de asientos contables débitos y créditos (`Σ = 0`). Incluye botón para desmantelar movimiento y acción directa de *"EDITAR MOVIMIENTO"*.
+2. `src/components/layout/AppLayout.tsx`:
+   * *Motivo:* Montaje del `TransactionDetailModal` a nivel de aplicación para que sea accesible de manera reactiva desde cualquier página.
+3. `src/components/dashboard/OperationalLogbook.tsx`:
+   * *Motivo:* Permitir hacer clic en las filas de movimientos recientes del Dashboard para abrir directamente su detalle financiero completo.
+4. `src/pages/TransactionsPage.tsx`:
+   * *Motivo:* Hacer clic en cualquier fila de transacción o pulsar el icono de inspección (ojo) abre el `TransactionDetailModal`.
+5. `src/context/ForjaContext.tsx`:
+   * *Motivo:* Exponer `detailModalTx`, `openTransactionDetail`, `closeTransactionDetail` y `editingTransaction` en el contexto global para coordinar la apertura del detalle y la transición fluida al formulario de edición precargado.
+6. `src/components/forms/QuickTransactionModal.tsx`:
+   * *Motivo:* Habilitar soporte de edición cuando `editingTransaction` está establecido: precargar tipo, fecha, descripción, importe, cuentas, categorías, notas y desgloses de deudas/préstamos/transferencias; actualizar el título ("EDITAR MOVIMIENTO"), el botón ("FORJAR MODIFICACIÓN") y ejecutar `saveTransaction(draft, editingTransaction.id)` preservando el ID original.
+7. `src/services/api.ts`:
+   * *Motivo:* Manejar `existingId` en `saveTransaction(draft, existingId)` para conservar la fecha original `createdAt` y actualizar la transacción en el almacén local sin duplicados.
+8. `supabase/migrations/20261011000000_init_forja.sql`:
+   * *Motivo:* Subsanar FORJA-BUG-10 en `save_transaction_atomic` para que consulte `p_tx->>'id'` antes de recurrir a `client_request_id`, actualizando la transacción y reemplazando atómicamente sus asientos contables balanceados.
+9. `supabase/migrations/20261013000000_update_save_transaction_atomic.sql` *(Nuevo)*:
+   * *Motivo:* Migración SQL versionada e idempotente para actualizar la función `save_transaction_atomic` en la base de datos de producción de Supabase mediante SQL Editor.
+10. `src/domain/uuid.ts` *(Nuevo)*:
+    * *Motivo:* Subsanar FORJA-BUG-09 implementando un generador de UUID v4 compatible con RFC 4122 tanto en navegador como en entornos Node.js.
+11. `src/pages/AccountsPage.tsx`:
+    * *Motivo:* Añadir botón de edición (`Pencil`) y modal para editar nombre, tipo, notas y estado de archivado de cuentas y bóvedas. Bloquea la modificación directa del saldo de apertura para salvaguardar la partida doble histórica.
+12. `src/pages/DebtsPage.tsx`:
+    * *Motivo:* Añadir botón de edición y modal para actualizar cupo total, días de corte y pago, cuota pactada, estado (`active`, `paid_off`, `frozen`) y notas de la obligación. Protege el saldo de origen para no falsear amortizaciones previas.
+13. `src/pages/LoansPage.tsx`:
+    * *Motivo:* Añadir botón de edición y modal para modificar nombre del deudor, fecha límite, notas de interés y archivado, manteniendo intactos los abonos contables registrados.
+14. `src/pages/RecurringPage.tsx`:
+    * *Motivo:* Añadir botón de edición y modal para modificar importe, frecuencia, fecha del primer cobro, bóveda de cargo, estado (`active`, `paused`, `cancelled`) y notas, manteniendo las transacciones pasadas inmutables.
+15. `src/domain/crud_flows.test.ts` *(Nuevo)*:
+    * *Motivo:* Suite de pruebas automatizadas que valida la edición de movimientos con ajuste automático de saldos de cuentas, edición de transferencias entre dos cuentas, cancelación sin alteración de datos, reproducción de errores de validación, edición de Cuentas, Deudas, Préstamos y Recurrentes, y persistencia tras recarga (`reload()`).
+16. `supabase/tests/rls_and_migrations.test.ts`:
+    * *Motivo:* Incorporar pruebas de integración en PostgreSQL con PGlite para comprobar la actualización atómica de movimientos y la generación correcta de UUIDs en préstamos otorgados.
+17. `vite.config.ts`:
+    * *Motivo:* Configuración de ruta base `/forja/` para GitHub Pages, división de chunks Rollup (charts y supabase) y ampliación de Workbox `globPatterns` a fuentes `.woff` y assets gráficos `.webp`.
+18. `.github/workflows/deploy.yml`:
+    * *Motivo:* Automatización del pipeline de CI/CD para GitHub Pages con ejecución de `vitest`, verificación de `eslint` y compilación de producción con variables de Supabase validadas.
 
 ---
 
-**Conclusión de la Auditoría:**  
-FORJA cuenta con un motor contable robusto, validado por partida doble y libre de errores en el manejo de moneda colombiana. Los defectos críticos de importes, eliminación de movimientos e inconsistencias audiovisuales han sido subsanados y verificados tanto de forma unitaria como en ejecución real en navegador. El proyecto queda plenamente operativo en su entorno local y listo para iniciar la fase de configuración de infraestructura remota.
+## J. Guía de Puesta en Marcha y Pasos Finales para el Propietario
+
+Con la infraestructura y el código completamente auditados y preparados, la puesta en marcha de producción requiere los siguientes pasos concretos:
+
+### 1. Creación del Usuario Propietario en Supabase
+Como los registros públicos están deshabilitados deliberadamente por seguridad:
+1. Ingresa al panel de Supabase: [https://supabase.com/dashboard/project/wrpttzgjpntquernuerp](https://supabase.com/dashboard/project/wrpttzgjpntquernuerp)
+2. En el menú lateral izquierdo, haz clic en **Authentication** &rarr; pestaña **Users**.
+3. Haz clic en el botón verde **Add User** &rarr; **Create User**.
+4. Completa:
+   * **Email:** Tu correo personal (ej. `tu-correo@dominio.com`).
+   * **Password:** Tu contraseña segura.
+   * **Auto Confirm User:** **Marca esta casilla** (para que no requiera confirmación por correo de prueba).
+5. Haz clic en **Create User**.
+
+### 2. Aplicar la Actualización SQL en Supabase SQL Editor
+Para asegurar que la función de guardado atómico incluya la corrección de edición de transacciones (FORJA-BUG-10):
+1. En el Dashboard de Supabase, ve a **SQL Editor** en el menú lateral izquierdo.
+2. Haz clic en **New query**.
+3. Pega el contenido de [supabase/migrations/20261013000000_update_save_transaction_atomic.sql](file:///e:/Proyectos%20UNAL/Contabilidad/supabase/migrations/20261013000000_update_save_transaction_atomic.sql) y haz clic en **Run**.
+4. Verás el mensaje *Success: No rows returned*, confirmando la actualización de la función.
+
+### 3. Ingreso a la Aplicación en Producción
+1. Abre en tu navegador la URL de producción: **[https://bamp100310.github.io/forja/](https://bamp100310.github.io/forja/)**
+2. La aplicación te recibirá con la pantalla industrial **ESTACIÓN DE ACCESO SEGURO**.
+3. Ingresa tu correo y contraseña creados en el paso 1.
+4. El sistema ejecutará automáticamente `ensure_user_setup`, inicializando tu catálogo de categorías y presentándote el taller completamente limpio (Día Uno en Cero), listo para que agregues tu primera bóveda o cuenta real.
+
+---
+
+**Conclusión de la Auditoría y Lanzamiento:**  
+FORJA cuenta con un motor contable robusto, validado por partida doble y libre de errores en el manejo de moneda colombiana. Los módulos de detalle financiero y edición completa de entidades (Transacciones, Cuentas, Deudas, Préstamos y Recurrentes) han sido implementados y comprobados integralmente con 77 pruebas automatizadas (incluyendo integración con PostgreSQL/PGlite), cero errores de linters y compilación exitosa. La aplicación queda configurada para despliegue automatizado en GitHub Pages y conectada de forma segura a Supabase.

@@ -454,10 +454,16 @@ begin
     on conflict (id) do nothing;
   end if;
 
-  -- Comprobar si ya existe por client_request_id (idempotencia)
-  select id into v_existing_tx_id
-    from public.transactions
-   where user_id = v_uid and client_request_id = v_client_req_id;
+  -- Comprobar si ya existe por ID explícito (edición) o por client_request_id (idempotencia)
+  if (p_tx->>'id') is not null and trim(p_tx->>'id') <> '' then
+    select id into v_existing_tx_id
+      from public.transactions
+     where user_id = v_uid and id = (p_tx->>'id')::uuid;
+  elsif v_client_req_id is not null and trim(v_client_req_id) <> '' then
+    select id into v_existing_tx_id
+      from public.transactions
+     where user_id = v_uid and client_request_id = v_client_req_id;
+  end if;
 
   if v_existing_tx_id is not null then
     v_tx_id := v_existing_tx_id;

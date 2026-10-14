@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { Plus, Download, Trash2, Search } from 'lucide-react'
+import { Plus, Download, Trash2, Search, Eye } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { formatCOP } from '../domain/money'
 import { formatShortDate } from '../domain/dates'
@@ -18,6 +18,7 @@ export const TransactionsPage: React.FC = () => {
     index,
     deleteTransaction,
     openQuickModal,
+    openTransactionDetail,
   } = useForja()
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -232,17 +233,21 @@ export const TransactionsPage: React.FC = () => {
                   const cat = desc.categoryId ? index.categories.get(desc.categoryId) : null
 
                   return (
-                    <tr key={tx.id} className="hover:bg-[#121f1c]/80 transition-colors">
+                    <tr
+                      key={tx.id}
+                      onClick={() => openTransactionDetail(tx)}
+                      className="hover:bg-[#132420] transition-colors cursor-pointer group"
+                    >
                       <td className="py-2.5 px-3 whitespace-nowrap font-mono text-slate-400 text-xs">
                         {formatShortDate(tx.date, true)}
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-2">
-                          <div className="p-1 rounded bg-[#0d1614] border border-[#213731] shrink-0">
+                          <div className="p-1 rounded bg-[#0d1614] border border-[#213731] shrink-0 group-hover:border-emerald-600/50">
                             {getSpriteForTransaction(tx.kind, tx.isMoto)}
                           </div>
                           <div>
-                            <span className="font-medium text-slate-100 text-xs">{tx.description}</span>
+                            <span className="font-medium text-slate-100 text-xs group-hover:text-emerald-300 transition-colors">{tx.description}</span>
                             {tx.notes && (
                               <p className="text-[11px] text-slate-500 italic mt-0.5">{tx.notes}</p>
                             )}
@@ -284,14 +289,30 @@ export const TransactionsPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => handleOpenDelete(tx.id, tx.description)}
-                          className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                          title="Eliminar movimiento"
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openTransactionDetail(tx)
+                            }}
+                            className="p-1.5 rounded text-slate-400 hover:text-emerald-300 hover:bg-[#152e25] transition-colors cursor-pointer"
+                            title="Ver detalle y asientos"
+                            aria-label="Ver detalle"
+                          >
+                            <Eye size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleOpenDelete(tx.id, tx.description)
+                            }}
+                            className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                            title="Eliminar movimiento"
+                            aria-label="Eliminar"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

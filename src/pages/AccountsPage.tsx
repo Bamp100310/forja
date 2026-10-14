@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
-import { Plus, X, Trash2 } from 'lucide-react'
+import { Plus, X, Trash2, Pencil, AlertCircle } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { formatCOP } from '../domain/money'
 import { formatShortDate } from '../domain/dates'
-import { ACCOUNT_KIND_LABELS, LIQUID_ACCOUNT_KINDS, type AccountKind } from '../domain/types'
+import { ACCOUNT_KIND_LABELS, LIQUID_ACCOUNT_KINDS, type Account, type AccountKind } from '../domain/types'
 import { MoneyInput } from '../components/forms/MoneyInput'
 import { PixelSprite } from '../components/common/PixelSprite'
 import { EmptyState } from '../components/common/EmptyState'
@@ -13,33 +13,80 @@ import { triggerPixelSparks, triggerButtonSparks } from '../components/common/Pi
 export const AccountsPage: React.FC = () => {
   const { accounts, balances, transactions, saveAccount, deleteAccount, today, openQuickModal } = useForja()
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [name, setName] = useState('')
   const [kind, setKind] = useState<AccountKind>('bank')
   const [openingBalance, setOpeningBalance] = useState<number>(0)
   const [notes, setNotes] = useState('')
+  const [isArchived, setIsArchived] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleOpenCreate = (e?: React.MouseEvent<HTMLElement>) => {
+    sound.playClick()
+    if (e) triggerButtonSparks(e, 'forge', 18)
+    setEditingAccount(null)
+    setName('')
+    setKind('bank')
+    setOpeningBalance(0)
+    setNotes('')
+    setIsArchived(false)
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleOpenEdit = (acc: Account) => {
+    sound.playClick()
+    setEditingAccount(acc)
+    setName(acc.name)
+    setKind(acc.kind)
+    setOpeningBalance(acc.openingBalance)
+    setNotes(acc.notes || '')
+    setIsArchived(Boolean(acc.isArchived))
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    if (isSubmitting) return
+    sound.playClick()
+    setModalOpen(false)
+    setEditingAccount(null)
+    setErrorMessage(null)
+  }
+
+  const handleSubmitAccount = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!name.trim()) {
+      setErrorMessage('El nombre de la bóveda es obligatorio.')
+      return
+    }
+    setIsSubmitting(true)
+    setErrorMessage(null)
     try {
       await saveAccount({
+        ...(editingAccount ? { id: editingAccount.id } : {}),
         name: name.trim(),
         kind,
-        openingBalance,
-        openingDate: today,
-        color: null,
-        isArchived: false,
+        openingBalance: editingAccount ? editingAccount.openingBalance : openingBalance,
+        openingDate: editingAccount ? editingAccount.openingDate : today,
+        color: editingAccount ? editingAccount.color : null,
+        isArchived,
         notes: notes.trim() || null,
-        sortOrder: accounts.length + 1,
+        sortOrder: editingAccount ? editingAccount.sortOrder : accounts.length + 1,
       })
       sound.playConfirm()
       triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.45, 'cyan', 14)
       setModalOpen(false)
+      setEditingAccount(null)
       setName('')
       setOpeningBalance(0)
       setNotes('')
     } catch (err) {
       sound.playError()
-      alert((err as Error).message)
+      setErrorMessage((err as Error).message || 'Error al persistir la bóveda')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -114,11 +161,7 @@ export const AccountsPage: React.FC = () => {
             <span>TRANSFERIR</span>
           </button>
           <button
-            onClick={(e) => {
-              sound.playClick()
-              triggerButtonSparks(e, 'forge', 18)
-              setModalOpen(true)
-            }}
+            onClick={handleOpenCreate}
             className="btn-game btn-game-primary btn-forge-heat text-xs py-2 px-3.5 flex items-center gap-2 cursor-pointer font-pixel font-bold"
           >
             <Plus size={15} />
@@ -134,7 +177,7 @@ export const AccountsPage: React.FC = () => {
           title="Sin bóvedas o cuentas instaladas"
           description="Crea tu primera caja de efectivo, cuenta de ahorros o billetera virtual para gestionar tus flujos."
           actionLabel="+ INSTALAR PRIMERA BÓVEDA"
-          onAction={() => setModalOpen(true)}
+          onAction={handleOpenCreate}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -156,7 +199,14 @@ export const AccountsPage: React.FC = () => {
                       {getAccountSprite(acc.kind)}
                     </div>
                     <div>
-                      <h3 className="font-bold text-slate-100 text-sm">{acc.name}</h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-bold text-slate-100 text-sm">{acc.name}</h3>
+                        {acc.isArchived && (
+                          <span className="badge-pixel text-[8px] bg-slate-800 text-slate-400 border-slate-600 px-1">
+                            ARCHIVADA
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-slate-400 font-pixel tracking-wider uppercase">
                         {ACCOUNT_KIND_LABELS[acc.kind]}
                       </span>
@@ -173,6 +223,14 @@ export const AccountsPage: React.FC = () => {
                     >
                       {isLiquid ? 'LÍQUIDO DISPONIBLE' : 'POR COBRAR'}
                     </span>
+                    <button
+                      onClick={() => handleOpenEdit(acc)}
+                      className="p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-[#132620] transition-colors cursor-pointer"
+                      title="Modificar bóveda"
+                      aria-label="Modificar bóveda"
+                    >
+                      <Pencil size={13} />
+                    </button>
                     <button
                       onClick={() => handleDeleteAccount(acc.id, acc.name)}
                       className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
@@ -240,7 +298,7 @@ export const AccountsPage: React.FC = () => {
       </div>
       )}
 
-      {/* MODAL NUEVA CUENTA */}
+      {/* MODAL NUEVA / EDITAR CUENTA */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-emerald-800/80 shadow-2xl">
@@ -248,17 +306,26 @@ export const AccountsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <PixelSprite name="vault" size={20} />
                 <h3 className="font-stencil text-base text-emerald-400 font-bold tracking-wide">
-                  INSTALAR NUEVA BÓVEDA O CUENTA
+                  {editingAccount ? 'MODIFICAR BÓVEDA O CUENTA' : 'INSTALAR NUEVA BÓVEDA O CUENTA'}
                 </h3>
               </div>
               <button
-                onClick={() => setModalOpen(false)}
+                onClick={handleCloseModal}
+                disabled={isSubmitting}
                 className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#1a2d25] border border-transparent hover:border-[#2f5243] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
-            <form onSubmit={handleCreateAccount} className="space-y-3.5 text-xs">
+
+            {errorMessage && (
+              <div className="flex items-start gap-2 bg-rose-950/80 border border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel mb-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitAccount} className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                   NOMBRE DE LA CUENTA / BÓVEDA
@@ -291,12 +358,26 @@ export const AccountsPage: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                  SALDO INICIAL (COP)
-                </label>
-                <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" />
-              </div>
+              {editingAccount ? (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    SALDO INICIAL DE APERTURA (FIJO)
+                  </label>
+                  <div className="bg-[#080d0c] border border-[#213731] rounded-xs p-2 text-slate-400 text-xs font-mono">
+                    {formatCOP(openingBalance)}
+                  </div>
+                  <p className="text-[10px] text-amber-400/90 font-pixel mt-1">
+                    Para preservar la partida doble histórica, el saldo inicial no se altera directamente. Usa un movimiento de Ajuste si requieres cuadrar saldos.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    SALDO INICIAL (COP)
+                  </label>
+                  <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" />
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
@@ -311,16 +392,36 @@ export const AccountsPage: React.FC = () => {
                 />
               </div>
 
+              {editingAccount && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="acc-archived"
+                    checked={isArchived}
+                    onChange={(e) => setIsArchived(e.target.checked)}
+                    className="rounded-xs border border-[#213731] text-amber-500 bg-[#080d0c] cursor-pointer"
+                  />
+                  <label htmlFor="acc-archived" className="text-xs text-slate-300 font-pixel uppercase tracking-wider cursor-pointer font-bold select-none">
+                    Archivar bóveda (oculta de listas activas sin alterar asientos)
+                  </label>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2.5 pt-3.5 border-t-2 border-[#1c3029]">
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
                   className="btn-game btn-game-secondary text-xs py-2 px-3.5 font-pixel"
                 >
                   CANCELAR
                 </button>
-                <button type="submit" className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold">
-                  GUARDAR BÓVEDA
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold flex items-center gap-2"
+                >
+                  <span>{isSubmitting ? 'GUARDANDO...' : (editingAccount ? 'GUARDAR MODIFICACIONES' : 'GUARDAR BÓVEDA')}</span>
                 </button>
               </div>
             </form>

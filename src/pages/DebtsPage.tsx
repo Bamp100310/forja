@@ -1,10 +1,10 @@
 import React, { useState } from 'react'
-import { Plus, X, Calendar, Trash2 } from 'lucide-react'
+import { Plus, X, Calendar, Trash2, Pencil, AlertCircle } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { formatCOP } from '../domain/money'
 import { formatShortDate } from '../domain/dates'
 import { summarizeDebt } from '../domain/debts'
-import { DEBT_KIND_LABELS, type DebtKind } from '../domain/types'
+import { DEBT_KIND_LABELS, type Debt, type DebtKind } from '../domain/types'
 import { MoneyInput } from '../components/forms/MoneyInput'
 import { PixelSprite } from '../components/common/PixelSprite'
 import { sound } from '../services/sound'
@@ -13,6 +13,7 @@ import { triggerPixelSparks, triggerButtonSparks } from '../components/common/Pi
 export const DebtsPage: React.FC = () => {
   const { debts, balances, transactions, today, saveDebt, deleteDebt, openQuickModal } = useForja()
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingDebt, setEditingDebt] = useState<Debt | null>(null)
   const [name, setName] = useState('')
   const [kind, setKind] = useState<DebtKind>('credit_card')
   const [institution, setInstitution] = useState('')
@@ -21,36 +22,88 @@ export const DebtsPage: React.FC = () => {
   const [cutDay, setCutDay] = useState<number>(25)
   const [dueDay, setDueDay] = useState<number>(10)
   const [expectedInstallment, setExpectedInstallment] = useState<number>(0)
+  const [status, setStatus] = useState<Debt['status']>('active')
+  const [notes, setNotes] = useState<string>('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const handleCreateDebt = async (e: React.FormEvent) => {
+  const handleOpenCreate = (e?: React.MouseEvent<HTMLElement>) => {
+    sound.playClick()
+    if (e) triggerButtonSparks(e, 'forge', 18)
+    setEditingDebt(null)
+    setName('')
+    setKind('credit_card')
+    setInstitution('')
+    setOpeningBalance(0)
+    setCreditLimit(0)
+    setCutDay(25)
+    setDueDay(10)
+    setExpectedInstallment(0)
+    setStatus('active')
+    setNotes('')
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleOpenEdit = (debt: Debt) => {
+    sound.playClick()
+    setEditingDebt(debt)
+    setName(debt.name)
+    setKind(debt.kind)
+    setInstitution(debt.institution || '')
+    setOpeningBalance(debt.openingBalance)
+    setCreditLimit(debt.creditLimit || 0)
+    setCutDay(debt.cutDay || 25)
+    setDueDay(debt.dueDay || 10)
+    setExpectedInstallment(debt.expectedInstallment || 0)
+    setStatus(debt.status)
+    setNotes(debt.notes || '')
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    if (isSubmitting) return
+    sound.playClick()
+    setModalOpen(false)
+    setEditingDebt(null)
+    setErrorMessage(null)
+  }
+
+  const handleSubmitDebt = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!name.trim()) {
+      setErrorMessage('El nombre de la obligación es requerido.')
+      return
+    }
+    setIsSubmitting(true)
+    setErrorMessage(null)
     try {
       await saveDebt({
+        ...(editingDebt ? { id: editingDebt.id } : {}),
         name: name.trim(),
         kind,
         institution: institution.trim() || null,
-        openingBalance,
-        openingDate: today,
+        openingBalance: editingDebt ? editingDebt.openingBalance : openingBalance,
+        openingDate: editingDebt ? editingDebt.openingDate : today,
         creditLimit: creditLimit > 0 ? creditLimit : null,
-        interestRate: null,
+        interestRate: editingDebt ? editingDebt.interestRate : null,
         cutDay: cutDay > 0 ? cutDay : null,
         dueDay: dueDay > 0 ? dueDay : null,
         expectedInstallment: expectedInstallment > 0 ? expectedInstallment : null,
-        totalInstallments: null,
-        status: 'active',
-        notes: null,
+        totalInstallments: editingDebt ? editingDebt.totalInstallments : null,
+        status: editingDebt ? status : 'active',
+        notes: notes.trim() || null,
       })
       sound.playConfirm()
       triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.45, 'amber', 14)
       setModalOpen(false)
-      setName('')
-      setInstitution('')
-      setOpeningBalance(0)
-      setCreditLimit(0)
-      setExpectedInstallment(0)
+      setEditingDebt(null)
     } catch (err) {
       sound.playError()
-      alert((err as Error).message)
+      setErrorMessage((err as Error).message || 'Error al persistir la obligación')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -104,11 +157,7 @@ export const DebtsPage: React.FC = () => {
             <span>REGISTRAR ABONO</span>
           </button>
           <button
-            onClick={(e) => {
-              sound.playClick()
-              triggerButtonSparks(e, 'forge', 18)
-              setModalOpen(true)
-            }}
+            onClick={handleOpenCreate}
             className="btn-game btn-game-primary btn-forge-heat text-xs py-2 px-3.5 flex items-center gap-2 cursor-pointer font-pixel font-bold"
           >
             <Plus size={15} />
@@ -130,7 +179,7 @@ export const DebtsPage: React.FC = () => {
             No tienes obligaciones financieras activas en este momento. Tu capacidad productiva y flujo de caja están completamente limpios de pasivos.
           </p>
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={handleOpenCreate}
             className="btn-game btn-game-secondary text-xs py-2 px-4 mt-4 font-pixel cursor-pointer"
           >
             + REGISTRAR UNA OBLIGACIÓN SI EXISTE
@@ -174,6 +223,14 @@ export const DebtsPage: React.FC = () => {
                       >
                         {summary.isPaidOff ? 'CADENA ROTA (LIQUIDADA)' : 'ACTIVA'}
                       </span>
+                      <button
+                        onClick={() => handleOpenEdit(debt)}
+                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-[#2b170f] transition-colors cursor-pointer"
+                        title="Modificar obligación"
+                        aria-label="Modificar obligación"
+                      >
+                        <Pencil size={13} />
+                      </button>
                       <button
                         onClick={() => handleDeleteDebt(debt.id, debt.name)}
                         className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
@@ -289,7 +346,7 @@ export const DebtsPage: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL NUEVA OBLIGACIÓN */}
+      {/* MODAL NUEVA / EDITAR OBLIGACIÓN */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-amber-800/80 shadow-2xl">
@@ -297,18 +354,26 @@ export const DebtsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <PixelSprite name="chain" size={20} />
                 <h3 className="font-stencil text-base text-amber-400 font-bold tracking-wide">
-                  REGISTRAR NUEVA OBLIGACIÓN FINANCIERA
+                  {editingDebt ? 'MODIFICAR OBLIGACIÓN FINANCIERA' : 'REGISTRAR NUEVA OBLIGACIÓN FINANCIERA'}
                 </h3>
               </div>
               <button
-                onClick={() => setModalOpen(false)}
+                onClick={handleCloseModal}
+                disabled={isSubmitting}
                 className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b170f] border border-transparent hover:border-[#4d2818] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateDebt} className="space-y-3 text-xs">
+            {errorMessage && (
+              <div className="flex items-start gap-2 bg-rose-950/80 border border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel mb-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitDebt} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                   NOMBRE DE LA OBLIGACIÓN
@@ -352,12 +417,26 @@ export const DebtsPage: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                  SALDO ACTUAL ADEUDADO (COP)
-                </label>
-                <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" />
-              </div>
+              {editingDebt ? (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    SALDO INICIAL DE ORIGEN (FIJO)
+                  </label>
+                  <div className="bg-[#080504] border border-[#331c12] rounded-xs p-2 text-slate-400 font-mono text-xs">
+                    {formatCOP(openingBalance)}
+                  </div>
+                  <p className="text-[10px] text-amber-400/90 font-pixel mt-1">
+                    El saldo inicial está fijado en la partida doble histórica. Usa las operaciones de abono o cargos para modificar el saldo pendiente.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    SALDO ACTUAL ADEUDADO (COP)
+                  </label>
+                  <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" />
+                </div>
+              )}
 
               {kind === 'credit_card' && (
                 <div>
@@ -403,19 +482,51 @@ export const DebtsPage: React.FC = () => {
                 </div>
               </div>
 
+              {editingDebt && (
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    ESTADO DE LA OBLIGACIÓN
+                  </label>
+                  <select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as Debt['status'])}
+                    className="w-full bg-[#080504] border border-[#331c12] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="active">Activa (en amortización)</option>
+                    <option value="paid_off">Liquidada / Cadena rota</option>
+                    <option value="frozen">Congelada / En disputa</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                  NOTAS OPERATIVAS (OPCIONAL)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Detalles sobre seguro, condiciones, etc."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full bg-[#080504] border border-[#331c12] rounded-xs p-2 text-slate-200 text-xs font-pixel focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
               <div className="flex justify-end gap-2.5 pt-3.5 border-t-2 border-[#331c12]">
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
                   className="btn-game btn-game-secondary text-xs py-2 px-3.5 font-pixel"
                 >
                   CANCELAR
                 </button>
                 <button
                   type="submit"
-                  className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold"
+                  disabled={isSubmitting}
+                  className="btn-game btn-game-primary text-xs py-2 px-4.5 font-pixel font-bold flex items-center gap-2"
                 >
-                  GUARDAR OBLIGACIÓN
+                  <span>{isSubmitting ? 'GUARDANDO...' : (editingDebt ? 'GUARDAR MODIFICACIONES' : 'GUARDAR OBLIGACIÓN')}</span>
                 </button>
               </div>
             </form>
