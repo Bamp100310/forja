@@ -357,13 +357,18 @@ export function describeTransaction(tx: Transaction, index: LedgerIndex): Transa
         sourceLabel: accountNames.join(' → ') || null,
         categoryId: null,
       }
-    case 'debt_payment':
+    case 'debt_payment': {
+      const loanPosting = tx.postings.find((p) => p.targetType === 'loan' && p.amount < 0)
+      const loanFrom = loanPosting?.targetId ? index.loans.get(loanPosting.targetId)?.personName : null
+      const fromLabel = loanFrom ? `Préstamo (${loanFrom})` : accountNames[0]
+      const debtAmount = Math.abs(tx.postings.find((p) => p.targetType === 'debt' && p.amount > 0)?.amount ?? 0)
       return {
-        amount: sum((a, t) => t === 'account' && a < 0),
+        amount: debtAmount || sum((a, t) => t === 'account' && a < 0),
         tone: 'debt',
-        sourceLabel: [accountNames[0], debtName].filter(Boolean).join(' → ') || null,
+        sourceLabel: [fromLabel, debtName].filter(Boolean).join(' → ') || null,
         categoryId: null,
       }
+    }
     case 'debt_disbursement':
       return {
         amount: sum((a, t) => t === 'debt' && a < 0),
@@ -378,13 +383,18 @@ export function describeTransaction(tx: Transaction, index: LedgerIndex): Transa
         sourceLabel: [accountNames[0] ?? 'Saldo previo', loanName].filter(Boolean).join(' → '),
         categoryId: null,
       }
-    case 'loan_repayment':
+    case 'loan_repayment': {
+      const debtPosting = tx.postings.find((p) => p.targetType === 'debt' && p.amount > 0)
+      const debtTo = debtPosting?.targetId ? index.debts.get(debtPosting.targetId)?.name : null
+      const toLabel = debtTo ? `Abono a ${debtTo}` : accountNames[0]
+      const principalRepaid = Math.abs(tx.postings.find((p) => p.targetType === 'loan' && p.amount < 0)?.amount ?? 0)
       return {
-        amount: sum((a, t) => t === 'account' && a > 0),
+        amount: principalRepaid || sum((a, t) => t === 'account' && a > 0),
         tone: 'loan',
-        sourceLabel: [loanName, accountNames[0]].filter(Boolean).join(' → ') || null,
+        sourceLabel: [loanName, toLabel].filter(Boolean).join(' → ') || null,
         categoryId: findCategory('income')?.targetId ?? null,
       }
+    }
     case 'adjustment': {
       const target = tx.postings.find((p) => p.targetType !== 'equity')
       const amount = target ? (target.targetType === 'debt' ? -target.amount : target.amount) : 0

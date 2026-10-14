@@ -31,7 +31,12 @@ export const PayrollSummaryWidget: React.FC = () => {
     openQuickModal('income', null, {
       amount: primarySchedule.expectedAmount,
       toAccountId: primarySchedule.targetAccountId || undefined,
+      categoryId: primarySchedule.incomeCategoryId || undefined,
       description: `Salario recibido (${primarySchedule.name}) - ${projection?.nextPaydayDate || ''}`,
+      date: projection?.nextPaydayDate || undefined,
+      payrollScheduleId: primarySchedule.id,
+      expectedPaydayDate: projection?.nextPaydayDate || undefined,
+      isMoto: false,
     })
   }
 
@@ -81,7 +86,7 @@ export const PayrollSummaryWidget: React.FC = () => {
                 )}
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="font-stencil text-2xl font-bold text-slate-100">
+                <span className="num text-2xl font-bold text-slate-100">
                   {projection.daysRemaining}
                 </span>
                 <span className="text-xs text-amber-400 font-stencil uppercase tracking-wider">
@@ -90,8 +95,8 @@ export const PayrollSummaryWidget: React.FC = () => {
               </div>
               <div className="text-[11px] text-slate-400 mt-1 font-mono flex items-center gap-1">
                 <Calendar size={11} />
-                <span>{projection.nextPaydayDate}</span>
-                <span className="text-emerald-400 font-bold ml-auto font-pixel">
+                <span className="num">{projection.nextPaydayDate}</span>
+                <span className="text-emerald-400 font-bold ml-auto num">
                   {formatCOPCompact(projection.expectedAmount)}
                 </span>
               </div>
@@ -106,7 +111,7 @@ export const PayrollSummaryWidget: React.FC = () => {
                 </span>
                 <span className="text-[10px] text-slate-500 font-mono">/ DÍA</span>
               </div>
-              <div className="font-stencil text-2xl font-bold text-emerald-400">
+              <div className="num text-2xl font-bold text-emerald-400">
                 {dailyBudget ? formatCOP(dailyBudget.dailyBudget) : '$ 0'}
               </div>
               <div className="text-[11px] text-slate-400 mt-1 font-mono">
@@ -148,7 +153,7 @@ export const PayrollSummaryWidget: React.FC = () => {
                   <span className="text-[10px] text-slate-400 font-mono">{item.date}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-slate-100 font-bold">
+                  <span className="num text-slate-100 font-bold">
                     {formatCOPCompact(item.expectedAmount)}
                   </span>
                   <span

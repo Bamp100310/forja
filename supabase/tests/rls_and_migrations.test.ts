@@ -486,4 +486,40 @@ describe('Integración PostgreSQL + RLS con PGlite', () => {
     const totAfter = await db.query(`select total from public.ledger_target_totals where target_id = '${accId}';`)
     expect(Number(totAfter.rows[0].total)).toBe(-20000)
   })
+
+  it('FORJA V2 — almacena y actualiza cronogramas de nómina en income_schedules respetando RLS', async () => {
+    const db = await setupTestDb()
+    await asUser(db, USER_1)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    // Guardar cronograma de nómina para USER_1
+    const schedulePayload = JSON.stringify([
+      {
+        id: 'sched-101',
+        name: 'Nómina Quincenal Empresa',
+        expectedAmount: 1800000,
+        payDays: [15, 30],
+        scheduleType: 'biweekly',
+        isActive: true,
+      },
+    ])
+
+    await db.query(`
+      update public.user_preferences set
+        income_schedules = '${schedulePayload}'::jsonb
+      where user_id = '${USER_1}';
+    `)
+
+    const prefCheck = await db.query(`select income_schedules from public.user_preferences where user_id = '${USER_1}';`)
+    expect(prefCheck.rows[0].income_schedules.length).toBe(1)
+    expect((prefCheck.rows[0].income_schedules as Array<{ name: string; expectedAmount: number }>)[0].name).toBe('Nómina Quincenal Empresa')
+    expect((prefCheck.rows[0].income_schedules as Array<{ name: string; expectedAmount: number }>)[0].expectedAmount).toBe(1800000)
+
+    // USER_2 no puede leer ni modificar los cronogramas de USER_1
+    await asUser(db, USER_2)
+    await db.exec(`select public.ensure_user_setup();`)
+    const u2View = await db.query(`select income_schedules from public.user_preferences where user_id = '${USER_1}';`)
+    expect(u2View.rows.length).toBe(0)
+  })
 })
+

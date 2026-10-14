@@ -123,7 +123,7 @@ export const WorkshopHero: React.FC = () => {
                 <span className="text-[10px] font-stencil uppercase tracking-wider text-slate-400 block">
                   {hasMoto ? 'PRODUCCIÓN DEVENGADA DEL CORTE' : 'INGRESOS DEL PERIODO'}
                 </span>
-                <span className="font-pixel text-xl sm:text-2xl font-black text-emerald-300 block leading-tight">
+                <span className="num font-bold text-xl sm:text-2xl text-emerald-300 block leading-tight">
                   {formatCOP(summary.income)}
                 </span>
                 <span className="text-[11px] text-slate-400 block mt-0.5 font-pixel">

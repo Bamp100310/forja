@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Calendar,
   Clock,
@@ -10,6 +10,9 @@ import {
   DollarSign,
   TrendingUp,
   ArrowRight,
+  Edit3,
+  Power,
+  Check,
 } from 'lucide-react'
 import { useForja } from '../context/ForjaContext'
 import { PixelSprite } from '../components/common/PixelSprite'
@@ -30,7 +33,9 @@ export const PayrollPage: React.FC = () => {
     period,
     transactions,
     accounts,
+    categories,
     addIncomeSchedule,
+    updateIncomeSchedule,
     deleteIncomeSchedule,
     openQuickModal,
   } = useForja()
@@ -39,14 +44,39 @@ export const PayrollPage: React.FC = () => {
   const activeSchedules = schedules.filter((s) => s.isActive)
   const primarySchedule = activeSchedules[0] || null
 
+  // Categorías de ingresos para asociar
+  const incomeCategories = categories.filter((c) => c.kind === 'income' && !c.isArchived)
+  const defaultIncomeCategory =
+    incomeCategories.find(
+      (c) => c.name.toLowerCase().includes('salario') || c.name.toLowerCase().includes('nómina')
+    ) || incomeCategories[0]
+
   // Estado para creación/edición de cronograma
   const [isAdding, setIsAdding] = useState(false)
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [expectedAmount, setExpectedAmount] = useState<number>(1800000)
-  const [targetAccountId, setTargetAccountId] = useState(accounts[0]?.id || '')
+  const [targetAccountId, setTargetAccountId] = useState('')
+  const [incomeCategoryId, setIncomeCategoryId] = useState('')
   const [day1, setDay1] = useState(15)
   const [day2, setDay2] = useState(30)
   const [scheduleType, setScheduleType] = useState<'biweekly' | 'monthly'>('biweekly')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Asegurar que targetAccountId e incomeCategoryId tengan valores por defecto al cargar cuentas
+  useEffect(() => {
+    if (!targetAccountId && accounts.length > 0) {
+      const liquid = accounts.find((a) => ['bank', 'savings', 'wallet', 'cash'].includes(a.kind))
+      setTargetAccountId(liquid?.id || accounts[0].id)
+    }
+  }, [accounts, targetAccountId])
+
+  useEffect(() => {
+    if (!incomeCategoryId && defaultIncomeCategory) {
+      setIncomeCategoryId(defaultIncomeCategory.id)
+    }
+  }, [defaultIncomeCategory, incomeCategoryId])
 
   // Proyecciones
   const projection = primarySchedule ? getPaydayProjection(primarySchedule) : null
@@ -57,25 +87,109 @@ export const PayrollPage: React.FC = () => {
   // Ingresos del periodo
   const expectedItems = getExpectedIncomesInPeriod(schedules, period, transactions)
 
-  const handleCreateSchedule = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-
-    sound.playConfirm()
-    const payDays = scheduleType === 'biweekly' ? [day1, day2] : [day1]
-    await addIncomeSchedule({
-      name: name.trim(),
-      expectedAmount: Number(expectedAmount) || 0,
-      targetAccountId: targetAccountId || null,
-      incomeCategoryId: null,
-      scheduleType,
-      payDays,
-      isActive: true,
-      notes: null,
-    })
-
+  const handleStartNew = () => {
+    sound.playClick()
+    setEditingScheduleId(null)
     setName('')
+    setExpectedAmount(1800000)
+    setDay1(15)
+    setDay2(30)
+    setScheduleType('biweekly')
+    setErrorMessage(null)
+    setIsAdding(true)
+  }
+
+  const handleStartEdit = (sched: IncomeSchedule) => {
+    sound.playClick()
+    setEditingScheduleId(sched.id)
+    setName(sched.name)
+    setExpectedAmount(sched.expectedAmount)
+    setTargetAccountId(sched.targetAccountId || accounts[0]?.id || '')
+    setIncomeCategoryId(sched.incomeCategoryId || defaultIncomeCategory?.id || '')
+    setScheduleType(sched.scheduleType === 'monthly' ? 'monthly' : 'biweekly')
+    setDay1(sched.payDays[0] ?? 15)
+    setDay2(sched.payDays[1] ?? 30)
+    setErrorMessage(null)
+    setIsAdding(true)
+  }
+
+  const handleCancelForm = () => {
+    sound.playClick()
     setIsAdding(false)
+    setEditingScheduleId(null)
+    setErrorMessage(null)
+  }
+
+  const handleSaveSchedule = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setErrorMessage('Ingresa un nombre para la nómina o empleo.')
+      return
+    }
+    if (expectedAmount <= 0) {
+      setErrorMessage('El valor esperado del salario debe ser mayor que cero.')
+      return
+    }
+    if (day1 < 1 || day1 > 31) {
+      setErrorMessage('El día de pago debe ser un número válido entre 1 y 31.')
+      return
+    }
+    if (scheduleType === 'biweekly' && (day2 < 1 || day2 > 31)) {
+      setErrorMessage('El segundo día de pago debe ser un número válido entre 1 y 31.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const payDays = scheduleType === 'biweekly' ? [day1, day2] : [day1]
+
+      if (editingScheduleId) {
+        await updateIncomeSchedule(editingScheduleId, {
+          name: trimmed,
+          expectedAmount: Math.round(expectedAmount),
+          targetAccountId: targetAccountId || null,
+          incomeCategoryId: incomeCategoryId || null,
+          scheduleType,
+          payDays,
+        })
+        sound.playConfirm()
+      } else {
+        await addIncomeSchedule({
+          name: trimmed,
+          expectedAmount: Math.round(expectedAmount),
+          targetAccountId: targetAccountId || null,
+          incomeCategoryId: incomeCategoryId || null,
+          scheduleType,
+          payDays,
+          isActive: true,
+          notes: null,
+        })
+        sound.playConfirm()
+      }
+
+      setIsAdding(false)
+      setEditingScheduleId(null)
+      setName('')
+    } catch (err) {
+      console.error('Error guardando nómina:', err)
+      sound.playError()
+      setErrorMessage((err as Error).message || 'No se pudo guardar la programación salarial.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleToggleActive = async (sched: IncomeSchedule) => {
+    sound.playClick()
+    try {
+      await updateIncomeSchedule(sched.id, { isActive: !sched.isActive })
+    } catch (err) {
+      console.error('Error alternando estado de nómina:', err)
+      sound.playError()
+    }
   }
 
   const handleCollectPayday = (sched: IncomeSchedule, dateStr: string) => {
@@ -83,7 +197,12 @@ export const PayrollPage: React.FC = () => {
     openQuickModal('income', null, {
       amount: sched.expectedAmount,
       toAccountId: sched.targetAccountId || undefined,
+      categoryId: sched.incomeCategoryId || defaultIncomeCategory?.id || undefined,
       description: `Salario recibido (${sched.name}) - ${dateStr}`,
+      date: dateStr,
+      payrollScheduleId: sched.id,
+      expectedPaydayDate: dateStr,
+      isMoto: false,
     })
   }
 
@@ -142,7 +261,7 @@ export const PayrollPage: React.FC = () => {
                   {primarySchedule.name}
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
-                  <span className="font-stencil text-3xl font-bold text-slate-100">
+                  <span className="num text-3xl font-bold text-slate-100">
                     {projection.daysRemaining}
                   </span>
                   <span className="text-xs text-amber-300 font-stencil uppercase tracking-wider">
@@ -151,9 +270,9 @@ export const PayrollPage: React.FC = () => {
                 </div>
                 <div className="mt-2 text-xs text-slate-300 flex items-center gap-1.5 font-mono">
                   <Calendar size={13} className="text-slate-400" />
-                  <span>Fecha: {projection.nextPaydayDate}</span>
+                  <span className="num">Fecha: {projection.nextPaydayDate}</span>
                 </div>
-                <div className="mt-1 text-sm font-bold text-emerald-400 font-pixel">
+                <div className="mt-1 text-sm font-bold text-emerald-400 num">
                   Esperado: {formatCOP(projection.expectedAmount)}
                 </div>
               </div>
@@ -161,8 +280,8 @@ export const PayrollPage: React.FC = () => {
               <div className="text-center py-4 text-slate-400 text-xs">
                 <p>No tienes ningún cronograma de nómina activo.</p>
                 <button
-                  onClick={() => setIsAdding(true)}
-                  className="mt-3 text-emerald-400 hover:text-emerald-300 underline font-bold"
+                  onClick={handleStartNew}
+                  className="mt-3 text-emerald-400 hover:text-emerald-300 underline font-bold cursor-pointer"
                 >
                   Configurar tu primer salario
                 </button>
@@ -174,7 +293,7 @@ export const PayrollPage: React.FC = () => {
             <div className="mt-4 pt-3 border-t border-[#1b2b24]">
               <button
                 onClick={() => handleCollectPayday(primarySchedule, projection.nextPaydayDate)}
-                className="w-full btn-game btn-game-secondary text-xs py-2 text-emerald-400 font-bold flex items-center justify-center gap-1.5"
+                className="w-full btn-game btn-game-secondary text-xs py-2 text-emerald-400 font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <span>Asentar ingreso en cuenta</span>
                 <ArrowRight size={13} />
@@ -199,18 +318,18 @@ export const PayrollPage: React.FC = () => {
                 <span className="text-xs text-slate-400 block font-pixel">
                   Gasto diario recomendado
                 </span>
-                <div className="font-stencil text-2xl sm:text-3xl font-bold text-emerald-400 mt-1">
+                <div className="num text-2xl sm:text-3xl font-bold text-emerald-400 mt-1">
                   {formatCOP(dailyBudget.dailyBudget)}
                   <span className="text-xs text-slate-400 font-mono font-normal ml-1">/ día</span>
                 </div>
                 <div className="mt-3 text-xs text-slate-300 space-y-1 font-mono">
                   <div className="flex justify-between">
                     <span className="text-slate-400">Saldo líquido actual:</span>
-                    <span className="text-slate-100 font-bold">{formatCOP(balances.available)}</span>
+                    <span className="text-slate-100 font-bold num">{formatCOP(balances.available)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Días para distribuir:</span>
-                    <span className="text-amber-300 font-bold">{dailyBudget.daysCount} días</span>
+                    <span className="text-amber-300 font-bold num">{dailyBudget.daysCount} días</span>
                   </div>
                 </div>
               </div>
@@ -240,11 +359,11 @@ export const PayrollPage: React.FC = () => {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between p-2 rounded bg-[#0b1210] border border-[#1e342c]">
                 <span className="text-slate-400">Rango del corte:</span>
-                <span className="text-slate-200 font-bold font-mono">{period.label}</span>
+                <span className="text-slate-200 font-bold font-mono num">{period.label}</span>
               </div>
               <div className="flex justify-between p-2 rounded bg-[#0b1210] border border-[#1e342c]">
                 <span className="text-slate-400">Ingresos recibidos:</span>
-                <span className="text-emerald-400 font-bold font-mono">
+                <span className="text-emerald-400 font-bold num">
                   {formatCOP(
                     expectedItems
                       .filter((i) => i.isReceived)
@@ -254,7 +373,7 @@ export const PayrollPage: React.FC = () => {
               </div>
               <div className="flex justify-between p-2 rounded bg-[#0b1210] border border-[#1e342c]">
                 <span className="text-slate-400">Ingresos pendientes:</span>
-                <span className="text-amber-400 font-bold font-mono">
+                <span className="text-amber-400 font-bold num">
                   {formatCOP(
                     expectedItems
                       .filter((i) => !i.isReceived)
@@ -275,7 +394,7 @@ export const PayrollPage: React.FC = () => {
       <div className="forge-machine-panel rivet-corners p-5">
         <h2 className="font-stencil text-sm font-bold text-slate-200 uppercase tracking-wider border-b border-[#213731] pb-2.5 mb-4 flex items-center justify-between">
           <span>PAGOS PREVISTOS EN ESTE PERIODO ({period.shortLabel})</span>
-          <span className="text-xs text-slate-400 font-mono">{expectedItems.length} registros</span>
+          <span className="text-xs text-slate-400 font-mono num">{expectedItems.length} registros</span>
         </h2>
 
         {expectedItems.length === 0 ? (
@@ -303,13 +422,13 @@ export const PayrollPage: React.FC = () => {
                     <span className="font-pixel font-bold text-slate-100 block text-sm">
                       {item.scheduleName}
                     </span>
-                    <span className="text-xs text-slate-400 font-mono">Fecha: {item.date}</span>
+                    <span className="text-xs text-slate-400 font-mono num">Fecha: {item.date}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between sm:justify-end gap-3">
                   <div className="text-right">
-                    <span className="font-stencil text-base font-bold text-slate-100 block">
+                    <span className="num text-base font-bold text-slate-100 block">
                       {formatCOP(item.expectedAmount)}
                     </span>
                     <span
@@ -321,7 +440,12 @@ export const PayrollPage: React.FC = () => {
                     </span>
                   </div>
 
-                  {!item.isReceived && (
+                  {item.isReceived ? (
+                    <span className="badge-pixel bg-emerald-950 text-emerald-300 border-emerald-700 text-xs py-1 px-2.5 flex items-center gap-1 shrink-0">
+                      <Check size={12} />
+                      <span>COBRADO</span>
+                    </span>
+                  ) : (
                     <button
                       onClick={() => {
                         const s = schedules.find((x) => x.id === item.scheduleId)
@@ -345,28 +469,44 @@ export const PayrollPage: React.FC = () => {
           <h2 className="font-stencil text-sm font-bold text-slate-200 uppercase tracking-wider">
             MIS FUENTES DE NÓMINA Y SUELDOS
           </h2>
-          <button
-            onClick={(e) => {
-              sound.playClick()
-              triggerButtonSparks(e, 'emerald', 8)
-              setIsAdding(!isAdding)
-            }}
-            className="btn-game btn-game-secondary text-xs py-1.5 px-3 font-bold text-emerald-400 flex items-center gap-1.5"
-          >
-            <Plus size={14} />
-            <span>{isAdding ? 'CANCELAR' : 'NUEVO SALARIO'}</span>
-          </button>
+          {!isAdding && (
+            <button
+              onClick={(e) => {
+                sound.playClick()
+                triggerButtonSparks(e, 'emerald', 8)
+                handleStartNew()
+              }}
+              className="btn-game btn-game-secondary text-xs py-1.5 px-3 font-bold text-emerald-400 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>NUEVO SALARIO</span>
+            </button>
+          )}
         </div>
 
-        {/* Formulario de creación */}
+        {/* Mensaje de error visible */}
+        {errorMessage && (
+          <div className="mb-4 p-3 rounded bg-rose-950/60 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Formulario de creación / edición */}
         {isAdding && (
           <form
-            onSubmit={handleCreateSchedule}
+            onSubmit={handleSaveSchedule}
             className="mb-5 p-4 rounded-sm bg-[#0e1714] border border-[#2b4c3e] space-y-3"
           >
-            <h3 className="font-stencil text-xs text-amber-300 uppercase font-bold">
-              PROGRAMAR NUEVO PAGO SALARIAL
-            </h3>
+            <div className="flex items-center justify-between border-b border-[#1f372d] pb-2">
+              <h3 className="font-stencil text-xs text-amber-300 uppercase font-bold">
+                {editingScheduleId ? 'MODIFICAR PROGRAMACIÓN SALARIAL' : 'PROGRAMAR NUEVO PAGO SALARIAL'}
+              </h3>
+              <span className="text-[10px] text-slate-400 font-pixel">
+                {editingScheduleId ? 'Edita los importes y días de pago' : 'Configura tus fechas habituales'}
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="field-label">Nombre del concepto / Empleo</label>
@@ -384,9 +524,10 @@ export const PayrollPage: React.FC = () => {
                 <label className="field-label">Importe esperado (COP)</label>
                 <input
                   type="number"
-                  value={expectedAmount}
+                  value={expectedAmount || ''}
                   onChange={(e) => setExpectedAmount(Number(e.target.value))}
-                  className="field"
+                  placeholder="1800000"
+                  className="field field-number"
                   required
                 />
               </div>
@@ -404,7 +545,7 @@ export const PayrollPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="field-label">Cuenta donde lo recibes</label>
+                <label className="field-label">Bóveda de depósito</label>
                 <select
                   value={targetAccountId}
                   onChange={(e) => setTargetAccountId(e.target.value)}
@@ -419,45 +560,63 @@ export const PayrollPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="field-label">Día del primer pago habitual</label>
+                <label className="field-label">Categoría contable</label>
+                <select
+                  value={incomeCategoryId}
+                  onChange={(e) => setIncomeCategoryId(e.target.value)}
+                  className="field"
+                >
+                  {incomeCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="field-label">Día del primer pago habitual (1 a 31)</label>
                 <input
                   type="number"
                   min="1"
                   max="31"
                   value={day1}
                   onChange={(e) => setDay1(Number(e.target.value))}
-                  className="field"
+                  className="field field-number"
+                  required
                 />
               </div>
 
               {scheduleType === 'biweekly' && (
                 <div>
-                  <label className="field-label">Día del segundo pago habitual</label>
+                  <label className="field-label">Día del segundo pago habitual (1 a 31)</label>
                   <input
                     type="number"
                     min="1"
                     max="31"
                     value={day2}
                     onChange={(e) => setDay2(Number(e.target.value))}
-                    className="field"
+                    className="field field-number"
+                    required
                   />
                 </div>
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#1a2d24]">
               <button
                 type="button"
-                onClick={() => setIsAdding(false)}
-                className="btn-game btn-game-secondary text-xs py-1.5 px-3"
+                onClick={handleCancelForm}
+                className="btn-game btn-game-secondary text-xs py-1.5 px-3 cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="btn-game btn-game-primary text-xs py-1.5 px-4 font-bold"
+                disabled={isSaving}
+                className="btn-game btn-game-primary text-xs py-1.5 px-4 font-bold cursor-pointer flex items-center gap-1.5"
               >
-                GUARDAR PROGRAMACIÓN
+                <span>{isSaving ? 'GUARDANDO...' : editingScheduleId ? 'ACTUALIZAR SALARIO' : 'GUARDAR PROGRAMACIÓN'}</span>
               </button>
             </div>
           </form>
@@ -473,35 +632,68 @@ export const PayrollPage: React.FC = () => {
             {schedules.map((s) => (
               <div
                 key={s.id}
-                className="p-3.5 rounded-sm bg-[#0a100e] border border-[#1e342c] flex items-center justify-between"
+                className={`p-3.5 rounded-sm border transition-all flex items-center justify-between ${
+                  s.isActive
+                    ? 'bg-[#0a100e] border-[#1e342c]'
+                    : 'bg-[#060a08] border-[#15241e] opacity-60'
+                }`}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-pixel font-bold text-slate-100 text-sm">{s.name}</span>
+                <div className="min-w-0 pr-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-pixel font-bold text-slate-100 text-sm truncate">
+                      {s.name}
+                    </span>
                     <span className="badge-pixel text-[9px] bg-[#1a2c24] text-emerald-300">
                       Días: {s.payDays.join(' y ')}
                     </span>
+                    {!s.isActive && (
+                      <span className="badge-pixel text-[9px] bg-slate-900 text-slate-400 border border-slate-700">
+                        PAUSADO
+                      </span>
+                    )}
                   </div>
-                  <span className="font-stencil text-emerald-400 font-bold block text-sm mt-0.5">
+                  <span className="num text-emerald-400 font-bold block text-sm mt-0.5">
                     {formatCOP(s.expectedAmount)}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    Cuenta: {accounts.find((a) => a.id === s.targetAccountId)?.name || 'Sin asignar'}
+                  <span className="text-[10px] text-slate-400 font-mono block">
+                    Bóveda: {accounts.find((a) => a.id === s.targetAccountId)?.name || 'Sin asignar'}
                   </span>
                 </div>
 
-                <button
-                  onClick={async () => {
-                    sound.playClick()
-                    if (window.confirm(`¿Eliminar la programación salarial «${s.name}»?`)) {
-                      await deleteIncomeSchedule(s.id)
-                    }
-                  }}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                  title="Eliminar programación"
-                >
-                  <Trash2 size={15} />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleToggleActive(s)}
+                    className={`p-1.5 rounded transition-colors cursor-pointer ${
+                      s.isActive
+                        ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/50'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900'
+                    }`}
+                    title={s.isActive ? 'Pausar cobros automáticos' : 'Activar cobros'}
+                  >
+                    <Power size={15} />
+                  </button>
+
+                  <button
+                    onClick={() => handleStartEdit(s)}
+                    className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-[#1a2c24] rounded transition-colors cursor-pointer"
+                    title="Editar programación"
+                  >
+                    <Edit3 size={15} />
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      sound.playClick()
+                      if (window.confirm(`¿Eliminar la programación salarial «${s.name}»?`)) {
+                        await deleteIncomeSchedule(s.id)
+                      }
+                    }}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
+                    title="Eliminar programación"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

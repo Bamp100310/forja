@@ -204,6 +204,59 @@ describe('Reglas contables — partida doble', () => {
     ).toThrow(/fecha/)
   })
 
+  it('cruce de cuentas: abono a deuda fondeado con préstamo por cobrar (extingue ambos sin mover efectivo)', () => {
+    // 1. Presté dinero (ej. compré pizza por los dos)
+    const lend = tx({ kind: 'loan_given', date: '2026-09-15', description: 'Pizza pagada a Jhonatan', loanId: 'loan-ana', accountId: 'acc-cash', amount: 50_000 })
+    // 2. Tenía una deuda previa
+    const disb = tx({ kind: 'debt_disbursement', date: '2026-09-10', description: 'Préstamo que me hizo', debtId: 'debt-loan', accountId: 'acc-bank', amount: 100_000 })
+    
+    const s1 = state([lend, disb])
+    expect(s1.balances.loanPending.get('loan-ana')).toBe(50_000)
+    expect(s1.balances.debtBalance.get('debt-loan')).toBe(100_000)
+    const cashBefore = s1.balances.accountBalance.get('acc-cash')
+    const bankBefore = s1.balances.accountBalance.get('acc-bank')
+
+    // 3. Cruzo el préstamo que yo le hice como abono a la deuda que me hizo él
+    const cruce = tx({
+      kind: 'debt_payment',
+      date: '2026-09-25',
+      description: 'Cruce de pizza como abono a la deuda',
+      debtId: 'debt-loan',
+      fromLoanId: 'loan-ana',
+      principal: 50_000,
+    })
+
+    const s2 = state([lend, disb, cruce])
+    // El préstamo por cobrar quedó saldado
+    expect(s2.balances.loanPending.get('loan-ana')).toBe(0)
+    // La deuda que le debía se redujo en 50.000
+    expect(s2.balances.debtBalance.get('debt-loan')).toBe(50_000)
+    // Ninguna cuenta de efectivo o banco cambió de saldo
+    expect(s2.balances.accountBalance.get('acc-cash')).toBe(cashBefore)
+    expect(s2.balances.accountBalance.get('acc-bank')).toBe(bankBefore)
+    // No generó ingreso ni gasto (es compensación patrimonial de activos y pasivos)
+    expect(s2.summary.income).toBe(0)
+    expect(s2.summary.expense).toBe(0)
+  })
+
+  it('cruce de cuentas: cobro de préstamo aplicado directamente como abono a deuda propia', () => {
+    const lend = tx({ kind: 'loan_given', date: '2026-09-15', description: 'Préstamo', loanId: 'loan-ana', accountId: 'acc-cash', amount: 80_000 })
+    const disb = tx({ kind: 'debt_disbursement', date: '2026-09-10', description: 'Deuda', debtId: 'debt-loan', accountId: 'acc-bank', amount: 100_000 })
+
+    const cruce = tx({
+      kind: 'loan_repayment',
+      date: '2026-09-25',
+      description: 'Devolución aplicada a deuda',
+      loanId: 'loan-ana',
+      toDebtId: 'debt-loan',
+      principal: 30_000,
+    })
+
+    const s = state([lend, disb, cruce])
+    expect(s.balances.loanPending.get('loan-ana')).toBe(50_000)
+    expect(s.balances.debtBalance.get('debt-loan')).toBe(70_000)
+  })
+
   it('saldo inicial de cuentas se respeta', () => {
     expect(base.balances.available).toBe(accounts[0].openingBalance + accounts[1].openingBalance)
   })

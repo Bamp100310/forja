@@ -105,7 +105,7 @@ const IndustrialGaugeCard: React.FC<GaugeCardProps> = ({
 
         {/* Importe numérico destacado con máxima legibilidad */}
         <div className="mt-1">
-          <div className={`font-pixel text-xl sm:text-2xl font-black tracking-tight ${styles.accentText}`}>
+          <div className={`num text-xl sm:text-2xl font-bold tracking-tight ${styles.accentText}`}>
             {formatCOP(amount)}
           </div>
           <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1 font-pixel">{subtitle}</p>

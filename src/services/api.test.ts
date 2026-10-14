@@ -191,4 +191,26 @@ describe('forjaApi LocalStore CRUD y persistencia', () => {
     const rawAfter = localStorage.getItem('forja_persistence_v2')
     expect(rawAfter).not.toContain('Ahorro para repuestos')
   })
+
+  it('deduplica estrictamente las categorías para prevenir duplicados históricos', async () => {
+    const catsBefore = await forjaApi.getCategories()
+    const pizzaCat = catsBefore.find((c) => c.name.toLowerCase().includes('pizza'))!
+
+    await forjaApi.saveCategory({
+      kind: pizzaCat.kind,
+      name: 'Pizza y Domicilios',
+      icon: 'pizza',
+      color: '#fb923c',
+      isMoto: false,
+      systemKey: null,
+      isArchived: false,
+      sortOrder: 99,
+    })
+
+    const catsAfter = await forjaApi.getCategories()
+    const pizzaCount = catsAfter.filter(
+      (c) => c.kind === 'expense' && c.name.toLowerCase().trim() === 'pizza y domicilios'
+    ).length
+    expect(pizzaCount).toBe(1)
+  })
 })

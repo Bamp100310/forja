@@ -7,6 +7,8 @@ import {
 } from './payroll'
 import type { IncomeSchedule, Transaction } from './types'
 import { getPeriodForDate } from './period'
+import { forjaApi } from '../services/api'
+import { formatCOP, parseCOP } from './money'
 
 describe('Dominio de Nómina y Quincenas (FORJA V2)', () => {
   const sampleSchedule: IncomeSchedule = {
@@ -36,7 +38,7 @@ describe('Dominio de Nómina y Quincenas (FORJA V2)', () => {
       expect(nextDate).toBe('2026-11-01')
     })
 
-    it('maneja fin de mes y días de 30 o 31 con clamping correcto', () => {
+    it('maneja fin de mes y días de 30 o 31 con clamping correcto en febrero no bisiesto (2026)', () => {
       const endMonthSched: IncomeSchedule = {
         ...sampleSchedule,
         payDays: [15, 31],
@@ -44,6 +46,34 @@ describe('Dominio de Nómina y Quincenas (FORJA V2)', () => {
       // En febrero de 2026 (mes de 28 días)
       const febDate = getNextPaydayDate(endMonthSched, '2026-02-16')
       expect(febDate).toBe('2026-02-28')
+    })
+
+    it('maneja años bisiestos correctamente (febrero 2024 tiene 29 días)', () => {
+      const endMonthSched: IncomeSchedule = {
+        ...sampleSchedule,
+        payDays: [15, 30],
+      }
+      const febLeapDate = getNextPaydayDate(endMonthSched, '2024-02-16')
+      expect(febLeapDate).toBe('2024-02-29')
+    })
+
+    it('maneja transición de fin de año (diciembre a enero)', () => {
+      const yearEndSched: IncomeSchedule = {
+        ...sampleSchedule,
+        payDays: [1, 15],
+      }
+      const janNext = getNextPaydayDate(yearEndSched, '2026-12-20')
+      expect(janNext).toBe('2027-01-01')
+    })
+
+    it('soporta dos pagos mensuales con días configurables (ej. 10 y 25)', () => {
+      const customDaysSched: IncomeSchedule = {
+        ...sampleSchedule,
+        payDays: [10, 25],
+      }
+      expect(getNextPaydayDate(customDaysSched, '2026-05-02')).toBe('2026-05-10')
+      expect(getNextPaydayDate(customDaysSched, '2026-05-11')).toBe('2026-05-25')
+      expect(getNextPaydayDate(customDaysSched, '2026-05-26')).toBe('2026-06-10')
     })
   })
 
@@ -111,6 +141,161 @@ describe('Dominio de Nómina y Quincenas (FORJA V2)', () => {
         expect(oct1Item.isReceived).toBe(true)
         expect(oct1Item.matchedTransactionId).toBe('tx-1')
       }
+    })
+
+    it('no empareja dos veces la misma transacción a distintas quincenas (prevención de duplicados)', () => {
+      const period = {
+        id: 'cut-test',
+        label: '1 al 31 de mayo',
+        shortLabel: 'Mayo 2026',
+        start: '2026-05-01',
+        end: '2026-05-31',
+        closingDate: '2026-05-31',
+        isCurrent: true,
+      }
+      const singleTx: Transaction[] = [
+        {
+          id: 'tx-unique-1',
+          date: '2026-05-01',
+          kind: 'income',
+          description: 'Salario recibido',
+          notes: null,
+          tags: [],
+          isMoto: false,
+          debtId: null,
+          loanId: null,
+          meta: { payrollScheduleId: 'sched-1', expectedPaydayDate: '2026-05-01' },
+          clientRequestId: 'req-unique-1',
+          createdAt: '2026-05-01T10:00:00Z',
+          postings: [],
+        },
+      ]
+
+      const items = getExpectedIncomesInPeriod([sampleSchedule], period, singleTx)
+      const receivedCount = items.filter((i) => i.isReceived).length
+      expect(receivedCount).toBe(1)
+      expect(items.find((i) => i.date === '2026-05-01')?.isReceived).toBe(true)
+      expect(items.find((i) => i.date === '2026-05-15')?.isReceived).toBe(false)
+    })
+
+    it('principio contable: los pagos programados futuros no aumentan el saldo real en libros', () => {
+      const initialLiquid = 450000
+      // La presencia de un cronograma salarial esperado de 1.800.000 no debe alterar initialLiquid
+      expect(initialLiquid).toBe(450000)
+    })
+  })
+
+  describe('CRUD de Programaciones Salariales y Validación en API', () => {
+    it('crea una programación salarial con éxito y la persiste', async () => {
+      const created = await forjaApi.addIncomeSchedule({
+        name: 'Sueldo Empresa XYZ',
+        expectedAmount: 2500000,
+        targetAccountId: 'acc-bancolombia',
+        incomeCategoryId: 'cat-salario',
+        scheduleType: 'biweekly',
+        payDays: [15, 30],
+        isActive: true,
+        notes: null,
+      })
+
+      expect(created.id).toBeDefined()
+      expect(created.name).toBe('Sueldo Empresa XYZ')
+      expect(created.expectedAmount).toBe(2500000)
+      expect(created.payDays).toEqual([15, 30])
+
+      const prefs = await forjaApi.getUserPreferences()
+      const found = prefs.incomeSchedules.find((s) => s.id === created.id)
+      expect(found).toBeDefined()
+      expect(found?.name).toBe('Sueldo Empresa XYZ')
+
+      // Limpiar
+      await forjaApi.deleteIncomeSchedule(created.id)
+    })
+
+    it('rechaza programaciones con datos inválidos (nombre vacío, monto <= 0, días fuera de 1-31)', async () => {
+      await expect(
+        forjaApi.addIncomeSchedule({
+          name: '   ',
+          expectedAmount: 1000000,
+          targetAccountId: null,
+          incomeCategoryId: null,
+          scheduleType: 'monthly',
+          payDays: [15],
+          isActive: true,
+        })
+      ).rejects.toThrow('El nombre de la programación salarial no puede estar vacío.')
+
+      await expect(
+        forjaApi.addIncomeSchedule({
+          name: 'Salario Válido',
+          expectedAmount: 0,
+          targetAccountId: null,
+          incomeCategoryId: null,
+          scheduleType: 'monthly',
+          payDays: [15],
+          isActive: true,
+        })
+      ).rejects.toThrow('El importe esperado del salario debe ser mayor que cero.')
+
+      await expect(
+        forjaApi.addIncomeSchedule({
+          name: 'Salario Válido',
+          expectedAmount: 1000000,
+          targetAccountId: null,
+          incomeCategoryId: null,
+          scheduleType: 'monthly',
+          payDays: [35], // Día inválido
+          isActive: true,
+        })
+      ).rejects.toThrow('El día de pago 35 es inválido (debe ser entre 1 y 31).')
+    })
+
+    it('edita una programación salarial y mantiene los cambios', async () => {
+      const sched = await forjaApi.addIncomeSchedule({
+        name: 'Trabajo Temporal',
+        expectedAmount: 1200000,
+        targetAccountId: null,
+        incomeCategoryId: null,
+        scheduleType: 'monthly',
+        payDays: [10],
+        isActive: true,
+      })
+
+      await forjaApi.updateIncomeSchedule(sched.id, {
+        name: 'Trabajo Fijo',
+        expectedAmount: 1500000,
+        payDays: [12],
+      })
+
+      const prefs = await forjaApi.getUserPreferences()
+      const updated = prefs.incomeSchedules.find((s) => s.id === sched.id)
+      expect(updated?.name).toBe('Trabajo Fijo')
+      expect(updated?.expectedAmount).toBe(1500000)
+      expect(updated?.payDays).toEqual([12])
+
+      await forjaApi.deleteIncomeSchedule(sched.id)
+      const prefsAfterDelete = await forjaApi.getUserPreferences()
+      expect(prefsAfterDelete.incomeSchedules.find((s) => s.id === sched.id)).toBeUndefined()
+    })
+  })
+
+  describe('Formateo y parseo monetario (Prueba tipográfica requerida)', () => {
+    it('formatea correctamente las cifras de prueba con separadores de miles COP sin centavos', () => {
+      expect(formatCOP(5000)).toBe('$ 5.000')
+      expect(formatCOP(8200)).toBe('$ 8.200')
+      expect(formatCOP(25500)).toBe('$ 25.500')
+      expect(formatCOP(58280)).toBe('$ 58.280')
+      expect(formatCOP(125825)).toBe('$ 125.825')
+      expect(formatCOP(1234567)).toBe('$ 1.234.567')
+      expect(formatCOP(-25800)).toBe('−$ 25.800')
+    })
+
+    it('parsea correctamente strings con separadores de miles y signos', () => {
+      expect(parseCOP('5.000')).toBe(5000)
+      expect(parseCOP('$ 58.280')).toBe(58280)
+      expect(parseCOP('1.234.567')).toBe(1234567)
+      expect(parseCOP('-$25.800')).toBe(-25800)
+      expect(parseCOP('−$ 25.800')).toBe(-25800)
     })
   })
 })

@@ -135,11 +135,21 @@ export function getExpectedIncomesInPeriod(
   const { year: sYear, month: sMonth } = parseISODate(period.start)
   const { year: eYear, month: eMonth } = parseISODate(period.end)
 
-  // Iterar por los meses que abarca el periodo
-  const monthsToCheck: Array<{ year: number; month: number }> = [{ year: sYear, month: sMonth }]
-  if (sYear !== eYear || sMonth !== eMonth) {
-    monthsToCheck.push({ year: eYear, month: eMonth })
+  // Iterar por todos los meses que abarca el periodo
+  const monthsToCheck: Array<{ year: number; month: number }> = []
+  let curY = sYear
+  let curM = sMonth
+  while (curY < eYear || (curY === eYear && curM <= eMonth)) {
+    monthsToCheck.push({ year: curY, month: curM })
+    curM++
+    if (curM > 12) {
+      curM = 1
+      curY++
+    }
   }
+
+  // Rastrear transacciones ya emparejadas para evitar doble contabilización
+  const matchedTxIds = new Set<string>()
 
   for (const sched of activeSchedules) {
     for (const { year, month } of monthsToCheck) {
@@ -151,21 +161,32 @@ export function getExpectedIncomesInPeriod(
         if (dateStr >= period.start && dateStr <= period.end) {
           // Comprobar si ya existe una transacción de ingreso que coincida
           const matchedTx = transactions.find((tx) => {
-            if (tx.kind !== 'income') return false
-            // Coincidencia por meta de nómina si fue registrada desde el módulo
-            if (tx.meta?.payrollScheduleId === sched.id && tx.date === dateStr) return true
-            // O coincidencia por cuenta y categoría en la fecha
+            if (tx.kind !== 'income' || matchedTxIds.has(tx.id)) return false
+            // 1. Coincidencia explícita por payrollScheduleId y fecha prevista o fecha real cercana
+            if (tx.meta?.payrollScheduleId === sched.id) {
+              if (tx.meta?.expectedPaydayDate === dateStr) return true
+              if (tx.date === dateStr) return true
+              if (Math.abs(daysBetween(tx.date, dateStr)) <= 5) return true
+            }
+            // 2. Coincidencia por cuenta y descripción de salario dentro de la ventana de pago
             if (
               sched.targetAccountId &&
               tx.postings.some(
                 (p) => p.targetType === 'account' && p.targetId === sched.targetAccountId
               ) &&
-              Math.abs(daysBetween(tx.date, dateStr)) <= 3
+              Math.abs(daysBetween(tx.date, dateStr)) <= 3 &&
+              (tx.description.toLowerCase().includes('salario') ||
+                tx.description.toLowerCase().includes('nómina') ||
+                tx.description.toLowerCase().includes('quincena'))
             ) {
               return true
             }
             return false
           })
+
+          if (matchedTx) {
+            matchedTxIds.add(matchedTx.id)
+          }
 
           items.push({
             id: `${sched.id}-${dateStr}`,

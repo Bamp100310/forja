@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from './supabase'
+import { DEFAULT_CATEGORIES } from '../domain/defaults'
 import {
   DEMO_ACCOUNTS,
   DEMO_BUDGETS,
@@ -78,7 +79,33 @@ class LocalStore {
     this.profile = initial.profile
     this.preferences = initial.preferences
     this.accounts = initial.accounts
-    this.categories = initial.categories
+    // Asegurar deduplicación estricta al cargar de localStorage
+    const seenLocal = new Set<string>()
+    this.categories = initial.categories.filter((c) => {
+      const key = `${c.kind}:${c.name.toLowerCase().trim()}`
+      if (seenLocal.has(key)) return false
+      seenLocal.add(key)
+      return true
+    })
+    // Asegurar que categorías esenciales personales existan en local sin duplicar
+    const missingInLocal = DEFAULT_CATEGORIES.filter(
+      (def) => !this.categories.some((c) => c.kind === def.kind && c.name.toLowerCase().trim() === def.name.toLowerCase().trim())
+    )
+    if (missingInLocal.length > 0) {
+      missingInLocal.forEach((def, idx) => {
+        this.categories.push({
+          id: `cat-default-${idx + 1}`,
+          kind: def.kind,
+          name: def.name,
+          icon: def.icon,
+          color: def.color,
+          isMoto: def.isMoto,
+          systemKey: def.systemKey,
+          isArchived: false,
+          sortOrder: this.categories.length + 1,
+        })
+      })
+    }
     this.debts = initial.debts
     this.loans = initial.loans
     this.transactions = initial.transactions
@@ -314,20 +341,56 @@ export const forjaApi = {
   },
 
   async getCategories(): Promise<Category[]> {
-    if (isUsingDemoMode() || !supabase) return [...inMemoryStore.categories].sort((a, b) => a.sortOrder - b.sortOrder)
+    if (isUsingDemoMode() || !supabase) {
+      const seen = new Set<string>()
+      return inMemoryStore.categories
+        .filter((c) => {
+          const key = `${c.kind}:${c.name.toLowerCase().trim()}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+    }
+
     const { data, error } = await supabase.from('categories').select('*').order('sort_order', { ascending: true })
     if (error) throw error
-    return data.map((d) => ({
-      id: d.id,
-      kind: d.kind,
-      name: d.name,
-      icon: d.icon,
-      color: d.color,
-      isMoto: d.is_moto,
-      systemKey: d.system_key,
-      isArchived: d.is_archived,
-      sortOrder: d.sort_order,
-    }))
+
+    // Deduplicar estrictamente por tipo y nombre para eliminar duplicados históricos
+    const seenKeys = new Set<string>()
+    const uniqueList: Category[] = []
+    const duplicateIds: string[] = []
+
+    for (const d of data) {
+      const key = `${d.kind}:${d.name.toLowerCase().trim()}`
+      if (seenKeys.has(key)) {
+        duplicateIds.push(d.id)
+      } else {
+        seenKeys.add(key)
+        uniqueList.push({
+          id: d.id,
+          kind: d.kind,
+          name: d.name,
+          icon: d.icon,
+          color: d.color,
+          isMoto: d.is_moto,
+          systemKey: d.system_key,
+          isArchived: d.is_archived,
+          sortOrder: d.sort_order,
+        })
+      }
+    }
+
+    // Purgar duplicados de la base de datos de forma asíncrona si existieran
+    if (duplicateIds.length > 0) {
+      try {
+        await supabase.from('categories').delete().in('id', duplicateIds)
+      } catch {
+        // Fallback si hay restricciones de FK
+      }
+    }
+
+    return uniqueList.sort((a, b) => a.sortOrder - b.sortOrder)
   },
 
   async saveCategory(cat: Omit<Category, 'id'> & { id?: string }): Promise<string> {
@@ -1076,14 +1139,61 @@ export const forjaApi = {
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle()
-      if (error || !data) return inMemoryStore.preferences
-      return {
-        userId: data.user_id,
-        enabledModules: (data.enabled_modules as import('../domain/modules').ModuleId[]) ?? inMemoryStore.preferences.enabledModules,
-        cycleConfig: (data.cycle_config as import('../domain/types').FinancialCycleConfig) ?? inMemoryStore.preferences.cycleConfig,
-        incomeSchedules: (data.income_schedules as import('../domain/types').IncomeSchedule[]) ?? inMemoryStore.preferences.incomeSchedules,
-        onboardingCompleted: data.onboarding_completed ?? inMemoryStore.preferences.onboardingCompleted,
+      if (error || !data) {
+        try {
+          await supabase.from('user_preferences').upsert(
+            {
+              user_id: user.id,
+              active_modules: inMemoryStore.preferences.enabledModules,
+              cycle_config: inMemoryStore.preferences.cycleConfig,
+              income_schedules: inMemoryStore.preferences.incomeSchedules,
+              onboarding_completed: inMemoryStore.preferences.onboardingCompleted,
+            },
+            { onConflict: 'user_id' }
+          )
+        } catch {
+          // Fallback
+        }
+        return inMemoryStore.preferences
       }
+
+      const remoteModules = (data.active_modules ?? data.enabled_modules) as
+        | import('../domain/modules').ModuleId[]
+        | undefined
+      const remoteConfigRaw = data.cycle_config as Record<string, unknown> | null | undefined
+      let normalizedCycleConfig: import('../domain/types').FinancialCycleConfig = inMemoryStore.preferences.cycleConfig
+      if (remoteConfigRaw && typeof remoteConfigRaw === 'object') {
+        const type = (remoteConfigRaw.type as import('../domain/types').FinancialCycleType) || 'calendar_month'
+        const cutStartDay = Number(
+          (remoteConfigRaw.cutStartDay as number | undefined) ??
+          (remoteConfigRaw.startDay as number | undefined) ??
+          (type === 'calendar_month' ? 1 : 11)
+        )
+        normalizedCycleConfig = {
+          type,
+          cutStartDay: cutStartDay > 0 && cutStartDay <= 31 ? cutStartDay : (type === 'calendar_month' ? 1 : 11),
+          quincenaDays: remoteConfigRaw.quincenaDays as [number, number] | undefined,
+        }
+      }
+
+      const remoteSchedules = data.income_schedules as
+        | import('../domain/types').IncomeSchedule[]
+        | undefined
+      const remoteOnboarding = data.onboarding_completed as boolean | undefined
+
+      const merged: UserPreferences = {
+        userId: data.user_id,
+        enabledModules: remoteModules ?? inMemoryStore.preferences.enabledModules,
+        cycleConfig: normalizedCycleConfig,
+        incomeSchedules: Array.isArray(remoteSchedules)
+          ? remoteSchedules
+          : inMemoryStore.preferences.incomeSchedules,
+        onboardingCompleted: remoteOnboarding ?? inMemoryStore.preferences.onboardingCompleted,
+      }
+
+      inMemoryStore.preferences = merged
+      inMemoryStore.persist()
+      return merged
     } catch {
       return inMemoryStore.preferences
     }
@@ -1101,14 +1211,20 @@ export const forjaApi = {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
-          await supabase.from('user_preferences').upsert({
-            user_id: user.id,
-            enabled_modules: updated.enabledModules,
-            cycle_config: updated.cycleConfig,
-            income_schedules: updated.incomeSchedules,
-            onboarding_completed: updated.onboardingCompleted,
-            updated_at: new Date().toISOString(),
-          })
+          const { error } = await supabase.from('user_preferences').upsert(
+            {
+              user_id: user.id,
+              active_modules: updated.enabledModules,
+              cycle_config: updated.cycleConfig,
+              income_schedules: updated.incomeSchedules,
+              onboarding_completed: updated.onboardingCompleted,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id' }
+          )
+          if (error) {
+            console.error('Error guardando user_preferences en Supabase:', error)
+          }
         }
       } catch (err) {
         console.warn('No se pudo guardar user_preferences en Supabase (usando fallback local):', err)
@@ -1118,17 +1234,67 @@ export const forjaApi = {
   },
 
   async addIncomeSchedule(schedule: Omit<IncomeSchedule, 'id'>): Promise<IncomeSchedule> {
+    const trimmedName = schedule.name?.trim()
+    if (!trimmedName) {
+      throw new Error('El nombre de la programación salarial no puede estar vacío.')
+    }
+    if (!schedule.expectedAmount || schedule.expectedAmount <= 0) {
+      throw new Error('El importe esperado del salario debe ser mayor que cero.')
+    }
+    if (!Array.isArray(schedule.payDays) || schedule.payDays.length === 0) {
+      throw new Error('Debes indicar al menos un día de pago para la programación.')
+    }
+    const invalidDay = schedule.payDays.find((d) => !Number.isInteger(d) || d < 1 || d > 31)
+    if (invalidDay !== undefined) {
+      throw new Error(`El día de pago ${invalidDay} es inválido (debe ser entre 1 y 31).`)
+    }
+
     const id = `sched-${Date.now()}`
-    const item: IncomeSchedule = { ...schedule, id }
+    const item: IncomeSchedule = {
+      ...schedule,
+      id,
+      name: trimmedName,
+      expectedAmount: Math.round(schedule.expectedAmount),
+      payDays: [...schedule.payDays].sort((a, b) => a - b),
+    }
     const nextSchedules = [...inMemoryStore.preferences.incomeSchedules, item]
     await this.updateUserPreferences({ incomeSchedules: nextSchedules })
     return item
   },
 
   async updateIncomeSchedule(id: string, updates: Partial<IncomeSchedule>): Promise<void> {
-    const nextSchedules = inMemoryStore.preferences.incomeSchedules.map((s) =>
-      s.id === id ? { ...s, ...updates } : s
-    )
+    if (updates.name !== undefined && !updates.name.trim()) {
+      throw new Error('El nombre de la programación salarial no puede estar vacío.')
+    }
+    if (updates.expectedAmount !== undefined && updates.expectedAmount <= 0) {
+      throw new Error('El importe esperado del salario debe ser mayor que cero.')
+    }
+    if (updates.payDays !== undefined) {
+      if (!Array.isArray(updates.payDays) || updates.payDays.length === 0) {
+        throw new Error('Debes indicar al menos un día de pago para la programación.')
+      }
+      const invalidDay = updates.payDays.find((d) => !Number.isInteger(d) || d < 1 || d > 31)
+      if (invalidDay !== undefined) {
+        throw new Error(`El día de pago ${invalidDay} es inválido (debe ser entre 1 y 31).`)
+      }
+    }
+
+    const nextSchedules = inMemoryStore.preferences.incomeSchedules.map((s) => {
+      if (s.id !== id) return s
+      return {
+        ...s,
+        ...updates,
+        name: updates.name !== undefined ? updates.name.trim() : s.name,
+        expectedAmount:
+          updates.expectedAmount !== undefined
+            ? Math.round(updates.expectedAmount)
+            : s.expectedAmount,
+        payDays:
+          updates.payDays !== undefined
+            ? [...updates.payDays].sort((a, b) => a - b)
+            : s.payDays,
+      }
+    })
     await this.updateUserPreferences({ incomeSchedules: nextSchedules })
   },
 

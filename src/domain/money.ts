@@ -71,12 +71,22 @@ export function parseCOPInput(text: string | number | null | undefined): number 
   const trimmed = text.trim()
   if (trimmed.length === 0) return null
 
-  // Limpiar posibles prefijos o sufijos de moneda y espacios
+  // Detectar signo negativo (acepta guion ASCII -, unicode minus − o paréntesis)
+  const isNegative = /^[-−]/.test(trimmed) || /^\(/.test(trimmed) || /[-−]/.test(trimmed)
+
+  // Limpiar prefijos de moneda, signos y espacios
   const clean = trimmed
+    .replace(/^[-−()$\s\u00a0]+/, '')
+    .replace(/[)$\s\u00a0]+(COP|cop)?$/, '')
     .replace(/^[$\s\u00a0]+/, '')
-    .replace(/[\s\u00a0]+(COP|cop)?$/, '')
     .trim()
   if (clean.length === 0) return null
+
+  const applySign = (val: number | null): number | null => {
+    if (val === null) return null
+    const finalVal = isNegative ? -val : val
+    return isMoney(finalVal) ? finalVal : null
+  }
 
   // Contar separadores
   const dotCount = (clean.match(/\./g) || []).length
@@ -95,7 +105,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const centsStr = clean.slice(lastComma + 1).replace(/[^\d]/g, '').slice(0, 2)
       const cents = centsStr.length > 0 ? Number(centsStr.padEnd(2, '0')) : 0
       const rounded = cents >= 50 ? base + 1 : base
-      return isMoney(rounded) ? rounded : null
+      return applySign(rounded)
     } else {
       // Formato en-US: «1,234,567.50» (comas son miles, punto es decimal)
       const intPart = clean.slice(0, lastDot).replace(/[^\d]/g, '')
@@ -105,7 +115,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const centsStr = clean.slice(lastDot + 1).replace(/[^\d]/g, '').slice(0, 2)
       const cents = centsStr.length > 0 ? Number(centsStr.padEnd(2, '0')) : 0
       const rounded = cents >= 50 ? base + 1 : base
-      return isMoney(rounded) ? rounded : null
+      return applySign(rounded)
     }
   }
 
@@ -116,7 +126,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const digits = clean.replace(/[^\d]/g, '')
       if (digits.length === 0) return null
       const value = Number(digits)
-      return Number.isSafeInteger(value) && isMoney(value) ? value : null
+      return applySign(Number.isSafeInteger(value) ? value : null)
     }
     // Una sola coma: distinguir «15,000» / «250,000» (miles) de «1234,50» (centavos)
     const parts = clean.split(',')
@@ -126,7 +136,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const digits = clean.replace(/[^\d]/g, '')
       if (digits.length === 0) return null
       const value = Number(digits)
-      return Number.isSafeInteger(value) && isMoney(value) ? value : null
+      return applySign(Number.isSafeInteger(value) ? value : null)
     }
     // 1 o 2 dígitos tras la coma representan centavos (ej. «1234,50», «1000,00», «50,5»)
     const intDigits = parts[0].replace(/[^\d]/g, '')
@@ -136,7 +146,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
     const centsStr = afterComma.slice(0, 2)
     const cents = centsStr.length > 0 ? Number(centsStr.padEnd(2, '0')) : 0
     const rounded = cents >= 50 ? base + 1 : base
-    return isMoney(rounded) ? rounded : null
+    return applySign(rounded)
   }
 
   // Caso 3: Solo puntos
@@ -146,7 +156,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const digits = clean.replace(/[^\d]/g, '')
       if (digits.length === 0) return null
       const value = Number(digits)
-      return Number.isSafeInteger(value) && isMoney(value) ? value : null
+      return applySign(Number.isSafeInteger(value) ? value : null)
     }
     // Un solo punto: distinguir «1.234», «15.000», «250.000» (miles) de «1234.50» (centavos)
     const parts = clean.split('.')
@@ -155,7 +165,7 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const digits = clean.replace(/[^\d]/g, '')
       if (digits.length === 0) return null
       const value = Number(digits)
-      return Number.isSafeInteger(value) && isMoney(value) ? value : null
+      return applySign(Number.isSafeInteger(value) ? value : null)
     }
     if (afterDot.length === 1 || afterDot.length === 2) {
       const intDigits = parts[0].replace(/[^\d]/g, '')
@@ -165,21 +175,23 @@ export function parseCOPInput(text: string | number | null | undefined): number 
       const centsStr = afterDot.slice(0, 2)
       const cents = centsStr.length > 0 ? Number(centsStr.padEnd(2, '0')) : 0
       const rounded = cents >= 50 ? base + 1 : base
-      return isMoney(rounded) ? rounded : null
+      return applySign(rounded)
     }
     const digits = clean.replace(/[^\d]/g, '')
     if (digits.length === 0) return null
     const value = Number(digits)
-    return Number.isSafeInteger(value) && isMoney(value) ? value : null
+    return applySign(Number.isSafeInteger(value) ? value : null)
   }
 
   // Caso 4: Solo dígitos numéricos
   const digits = clean.replace(/[^\d]/g, '')
   if (digits.length === 0) return null
   const value = Number(digits)
-  if (!Number.isSafeInteger(value) || !isMoney(value)) return null
-  return value
+  if (!Number.isSafeInteger(value)) return null
+  return applySign(value)
 }
+
+export const parseCOP = parseCOPInput
 
 export function sumMoney(values: Iterable<number>): number {
   let total = 0

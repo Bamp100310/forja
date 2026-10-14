@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { User, Database, Download, Plus, Check, Volume2, VolumeX, Trash2, RefreshCw, LogOut, Sliders, Calendar } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useForja } from '../context/ForjaContext'
@@ -12,6 +12,8 @@ import {
   canDisableModule,
   type ModuleId,
 } from '../domain/modules'
+import { DEFAULT_CATEGORIES } from '../domain/defaults'
+import { getCurrentPeriod } from '../domain/period'
 import { PixelSprite, type PixelSpriteName } from '../components/common/PixelSprite'
 import { sound } from '../services/sound'
 import { triggerPixelSparks } from '../components/common/PixelSparks'
@@ -59,6 +61,13 @@ export const SettingsPage: React.FC = () => {
     preferences.cycleConfig?.cutStartDay || 11
   )
   const [cycleSaved, setCycleSaved] = useState(false)
+
+  useEffect(() => {
+    if (preferences.cycleConfig) {
+      setCycleType(preferences.cycleConfig.type || 'custom_cut')
+      setCutStartDay(preferences.cycleConfig.cutStartDay || 11)
+    }
+  }, [preferences.cycleConfig])
 
   // Audio settings
   const [isMuted, setIsMuted] = useState(() => sound.isMuted())
@@ -135,6 +144,32 @@ export const SettingsPage: React.FC = () => {
         alert((err as Error).message)
       }
     }
+  }
+
+  const handleEnrichCategories = async () => {
+    sound.playConfirm()
+    triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.6, 'forge', 14)
+    const missing = DEFAULT_CATEGORIES.filter(
+      (def) => !categories.some((c) => c.name.toLowerCase() === def.name.toLowerCase())
+    )
+    if (missing.length === 0) {
+      alert('Ya tienes todas las categorías estándar disponibles.')
+      return
+    }
+    for (const def of missing) {
+      await saveCategory({
+        name: def.name,
+        kind: def.kind,
+        icon: def.icon,
+        color: def.color,
+        isMoto: def.isMoto,
+        systemKey: def.systemKey,
+        isArchived: false,
+        sortOrder: categories.length + 1,
+      })
+    }
+    sound.playConfirm()
+    alert(`Se han incorporado ${missing.length} categorías nuevas (Salario, Comida, Pizza, Mercado, etc.).`)
   }
 
   const handleResetFactory = async () => {
@@ -224,12 +259,12 @@ export const SettingsPage: React.FC = () => {
   const handleSaveCycle = async (e: React.FormEvent) => {
     e.preventDefault()
     sound.playConfirm()
-    await updatePreferences({
-      cycleConfig: {
-        type: cycleType,
-        cutStartDay: cycleType === 'custom_cut' ? Number(cutStartDay) || 11 : 1,
-      },
-    })
+    triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.4, 'forge', 12)
+    const newConfig: import('../domain/types').FinancialCycleConfig = {
+      type: cycleType,
+      cutStartDay: cycleType === 'calendar_month' ? 1 : Math.max(1, Math.min(31, Number(cutStartDay) || 1)),
+    }
+    await updatePreferences({ cycleConfig: newConfig })
     setCycleSaved(true)
     setTimeout(() => setCycleSaved(false), 2500)
   }
@@ -422,15 +457,33 @@ export const SettingsPage: React.FC = () => {
             )}
           </div>
 
-          <div className="p-3 bg-[#0a1210] border border-[#1e342c] rounded-sm flex items-center justify-between text-xs">
-            <div>
-              <span className="text-slate-400 font-pixel block text-[11px]">Periodo activo actual:</span>
-              <span className="text-emerald-300 font-stencil text-sm font-bold">{period.label}</span>
-            </div>
-            <span className="badge-pixel bg-[#14261f] text-emerald-400 border-[#234235] text-[10px]">
-              ID: {period.id}
-            </span>
-          </div>
+          {(() => {
+            const previewConfig: import('../domain/types').FinancialCycleConfig = {
+              type: cycleType,
+              cutStartDay: cycleType === 'calendar_month' ? 1 : Math.max(1, Math.min(31, Number(cutStartDay) || 1)),
+            }
+            const previewPeriod = getCurrentPeriod(new Date(), previewConfig)
+
+            return (
+              <div className="p-3 bg-[#0a1210] border border-[#1e342c] rounded-sm space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-slate-400 font-pixel block text-[11px]">Periodo activo actualmente en el sistema:</span>
+                    <span className="text-emerald-300 font-stencil text-sm font-bold">{period.label}</span>
+                  </div>
+                  <span className="badge-pixel bg-[#14261f] text-emerald-400 border-[#234235] text-[10px]">
+                    ID: {period.id}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-[#1a2d24] flex items-center justify-between text-[11px] font-pixel">
+                  <span className="text-slate-300">Corte resultante con esta configuración:</span>
+                  <span className="text-amber-300 font-bold bg-[#141e1b] px-2 py-0.5 rounded border border-[#233f34]">
+                    {previewPeriod.label}
+                  </span>
+                </div>
+              </div>
+            )
+          })()}
 
           <div className="flex items-center justify-end gap-3 pt-1 border-t border-[#1a2d26]">
             {cycleSaved && (
@@ -608,9 +661,19 @@ export const SettingsPage: React.FC = () => {
 
       {/* 3. GESTIÓN DE CATEGORÍAS */}
       <div className="forge-machine-panel rivet-corners p-5">
-        <h3 className="font-pixel text-xs tracking-wider text-slate-300 mb-3 border-b border-[#213731] pb-2 flex items-center justify-between">
-          <span>CATÁLOGO DE CATEGORÍAS ({categories.length})</span>
-          <span className="text-slate-500 font-mono text-[10px]">MÓDULO DE CLASIFICACIÓN</span>
+        <h3 className="font-pixel text-xs tracking-wider text-slate-300 mb-3 border-b border-[#213731] pb-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span>CATÁLOGO DE CATEGORÍAS ({categories.length})</span>
+            <span className="text-slate-500 font-mono text-[10px]">MÓDULO DE CLASIFICACIÓN</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleEnrichCategories}
+            className="btn-game btn-game-secondary text-[11px] py-1 px-2.5 text-emerald-300 font-bold self-start sm:self-auto cursor-pointer"
+            title="Añadir categorías cotidianas estándar que falten (Comida, Pizza, Salario, etc.)"
+          >
+            + RESTAURAR CATÁLOGO COMPLETO
+          </button>
         </h3>
 
         <form onSubmit={handleCreateCategory} className="flex flex-wrap items-end gap-3 mb-4 text-xs">

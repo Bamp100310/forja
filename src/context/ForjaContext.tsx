@@ -49,6 +49,9 @@ export interface QuickModalPrefill {
   loanId?: string
   isMoto?: boolean
   notes?: string
+  date?: string
+  payrollScheduleId?: string
+  expectedPaydayDate?: string
 }
 
 export interface ForjaContextType {
@@ -231,8 +234,18 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setProfile(p)
       setPreferences(prefs)
+      if (prefs.cycleConfig) {
+        setPeriod(getCurrentPeriod(new Date(), prefs.cycleConfig))
+      }
       setAccounts(accs)
-      setCategories(cats)
+      const seenCats = new Set<string>()
+      const cleanCats = cats.filter((c) => {
+        const key = `${c.kind}:${c.name.toLowerCase().trim()}`
+        if (seenCats.has(key)) return false
+        seenCats.add(key)
+        return true
+      })
+      setCategories(cleanCats)
       setDebts(dbs)
       setLoans(lns)
       setTransactions(txs)

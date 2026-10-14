@@ -36,6 +36,8 @@ export interface IncomeOp extends BaseOp {
   commission?: number
   /** Propinas recibidas (ingreso aparte). */
   tip?: number
+  payrollScheduleId?: string | null
+  expectedPaydayDate?: string | null
 }
 
 export type PaymentSource = { method: 'account'; accountId: string } | { method: 'debt'; debtId: string }
@@ -59,7 +61,10 @@ export interface TransferOp extends BaseOp {
 export interface DebtPaymentOp extends BaseOp {
   kind: 'debt_payment'
   debtId: string
-  accountId: string
+  /** Bóveda de origen del dinero. Opcional si se fondea mediante cruce de un préstamo por cobrar (`fromLoanId`). */
+  accountId?: string | null
+  /** ID del préstamo a favor que se descuenta/cruza como abono a esta deuda. */
+  fromLoanId?: string | null
   /** Abono a capital / saldo de la deuda. */
   principal: number
   /** Intereses incluidos en este pago (gasto financiero). */
@@ -105,7 +110,10 @@ export interface LoanGivenOp extends BaseOp {
 export interface LoanRepaymentOp extends BaseOp {
   kind: 'loan_repayment'
   loanId: string
-  accountId: string
+  /** Bóveda donde ingresa el dinero. Opcional si se aplica como abono a una deuda propia (`toDebtId`). */
+  accountId?: string | null
+  /** ID de la deuda propia a la que se abona el cobro de este préstamo. */
+  toDebtId?: string | null
   /** Capital devuelto (reduce lo que me deben, NO es ingreso). */
   principal: number
   /** Intereses pactados recibidos (ingreso financiero). */
@@ -252,7 +260,20 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
       if (!op.debtId || typeof op.debtId !== 'string' || op.debtId.trim() === '') {
         throw new OperationError('Se requiere una deuda para registrar el pago.')
       }
-      const lines = [line('account', op.accountId, -total, 'payment'), line('debt', op.debtId.trim(), principal, 'principal')]
+
+      const lines: Posting[] = []
+      if (op.fromLoanId) {
+        // Cruce de cuentas: compensación directa entre deuda pasiva y préstamo activo por cobrar
+        lines.push(line('loan', op.fromLoanId.trim(), -principal, 'principal'))
+        lines.push(line('debt', op.debtId.trim(), principal, 'principal'))
+      } else {
+        if (!op.accountId) {
+          throw new OperationError('Selecciona la cuenta o el préstamo con el que realizas el pago.')
+        }
+        lines.push(line('account', op.accountId, -total, 'payment'))
+        lines.push(line('debt', op.debtId.trim(), principal, 'principal'))
+      }
+
       if (interest > 0) {
         lines.push(line('category', requireSystemCategory(ctx, 'financial_interest'), interest, 'interest'))
       }
@@ -303,10 +324,20 @@ function buildPostings(op: OperationInput, ctx: BuildContext): Posting[] {
       if (!op.loanId || typeof op.loanId !== 'string' || op.loanId.trim() === '') {
         throw new OperationError('Se requiere un deudor o préstamo para registrar la devolución.')
       }
-      const lines = [
-        line('account', op.accountId, principal + interest, 'payment'),
-        line('loan', op.loanId.trim(), -principal, 'principal'),
-      ]
+
+      const lines: Posting[] = []
+      if (op.toDebtId) {
+        // Cruce de cuentas: la devolución del préstamo se abona a una deuda propia
+        lines.push(line('debt', op.toDebtId.trim(), principal, 'principal'))
+        lines.push(line('loan', op.loanId.trim(), -principal, 'principal'))
+      } else {
+        if (!op.accountId) {
+          throw new OperationError('Selecciona la bóveda donde recibes el dinero.')
+        }
+        lines.push(line('account', op.accountId, principal + interest, 'payment'))
+        lines.push(line('loan', op.loanId.trim(), -principal, 'principal'))
+      }
+
       if (interest > 0) {
         lines.push(line('category', requireSystemCategory(ctx, 'interest_income'), -interest, 'interest'))
       }
@@ -334,6 +365,8 @@ function relatedDebt(op: OperationInput): string | null {
     case 'debt_charge':
     case 'debt_disbursement':
       return op.debtId
+    case 'loan_repayment':
+      return op.toDebtId ?? null
     case 'adjustment':
       return op.target.type === 'debt' ? op.target.id : null
     default:
@@ -346,6 +379,8 @@ function relatedLoan(op: OperationInput): string | null {
     case 'loan_given':
     case 'loan_repayment':
       return op.loanId
+    case 'debt_payment':
+      return op.fromLoanId ?? null
     case 'adjustment':
       return op.target.type === 'loan' ? op.target.id : null
     default:

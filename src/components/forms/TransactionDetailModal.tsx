@@ -1,26 +1,14 @@
 import React, { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, Calendar, Edit3, Trash2, ShieldCheck, Bike } from 'lucide-react'
-import { PixelSprite } from '../common/PixelSprite'
+import { CategoryIcon } from '../common/CategoryIcon'
 import { useForja } from '../../context/ForjaContext'
 import { formatCOP } from '../../domain/money'
 import { formatShortDate } from '../../domain/dates'
 import { describeTransaction } from '../../domain/ledger/aggregate'
 import { sound } from '../../services/sound'
 import { triggerPixelSparks } from '../common/PixelSparks'
-import { TRANSACTION_KIND_LABELS, type TransactionKind } from '../../domain/types'
-
-const KIND_SPRITES: Record<TransactionKind, 'coins' | 'jerrycan' | 'conveyor' | 'chain' | 'sack' | 'ledger_check' | 'tools'> = {
-  income: 'coins',
-  expense: 'jerrycan',
-  transfer: 'conveyor',
-  debt_payment: 'chain',
-  debt_charge: 'chain',
-  debt_disbursement: 'chain',
-  loan_given: 'sack',
-  loan_repayment: 'ledger_check',
-  adjustment: 'tools',
-}
+import { TRANSACTION_KIND_LABELS } from '../../domain/types'
 
 const ROLE_LABELS: Record<string, string> = {
   gross: 'Ingreso Bruto',
@@ -79,7 +67,6 @@ export const TransactionDetailModal: React.FC = () => {
   const tx = detailModalTx
   const desc = describeTransaction(tx, index)
   const meta = (tx.meta || {}) as TxMetaDetails
-  const spriteName = KIND_SPRITES[tx.kind] || 'tools'
 
   const handleStartEdit = () => {
     sound.playClick()
@@ -134,8 +121,15 @@ export const TransactionDetailModal: React.FC = () => {
           <Dialog.Content className="pointer-events-auto w-full max-w-xl max-h-[92vh] overflow-y-auto forge-modal-box rivet-corners p-4 sm:p-5 shadow-2xl focus:outline-none bg-[#0c1411] border-2 border-[#233a30]">
             {/* Cabecera */}
             <div className="flex items-center justify-between pb-3 border-b-2 border-[#233a30]">
-              <Dialog.Title className="font-stencil text-base text-emerald-400 font-bold flex items-center gap-2 tracking-wide">
-                <PixelSprite name={spriteName} size={20} />
+              <Dialog.Title className="font-stencil text-base text-emerald-400 font-bold flex items-center gap-2.5 tracking-wide">
+                <CategoryIcon
+                  icon={index.categories.get(desc.categoryId || '')?.icon}
+                  categoryName={index.categories.get(desc.categoryId || '')?.name || tx.description}
+                  kind={tx.kind}
+                  isMoto={tx.isMoto}
+                  size={20}
+                  color={index.categories.get(desc.categoryId || '')?.color}
+                />
                 <span>DETALLE DEL MOVIMIENTO</span>
               </Dialog.Title>
               <Dialog.Close asChild>
@@ -224,7 +218,13 @@ export const TransactionDetailModal: React.FC = () => {
                   {desc.categoryId && (
                     <div>
                       <span className="text-[10px] text-slate-400 font-pixel block">Categoría Contable:</span>
-                      <span className="font-pixel text-emerald-300 font-bold">
+                      <span className="font-pixel text-emerald-300 font-bold inline-flex items-center gap-1.5 mt-0.5">
+                        <CategoryIcon
+                          icon={index.categories.get(desc.categoryId)?.icon}
+                          categoryName={index.categories.get(desc.categoryId)?.name}
+                          size={13}
+                          color={index.categories.get(desc.categoryId)?.color}
+                        />
                         {index.categories.get(desc.categoryId)?.name || 'Categoría'}
                       </span>
                     </div>

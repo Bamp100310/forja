@@ -5,22 +5,11 @@ import { formatCOP } from '../../domain/money'
 import { formatShortDate } from '../../domain/dates'
 import { describeTransaction } from '../../domain/ledger/aggregate'
 import { isDateInPeriod } from '../../domain/period'
-import { PixelSprite, type PixelSpriteName } from '../common/PixelSprite'
+import { PixelSprite } from '../common/PixelSprite'
+import { CategoryIcon, resolveCategoryColor } from '../common/CategoryIcon'
 import { EmptyState } from '../common/EmptyState'
 import { ArrowRight, Bike } from 'lucide-react'
 import type { TransactionKind } from '../../domain/types'
-
-const KIND_SPRITES: Record<TransactionKind, PixelSpriteName> = {
-  income: 'coins',
-  expense: 'jerrycan',
-  transfer: 'conveyor',
-  debt_payment: 'chain',
-  debt_charge: 'chain',
-  debt_disbursement: 'vault',
-  loan_given: 'sack',
-  loan_repayment: 'sack',
-  adjustment: 'tools',
-}
 
 const KIND_LABELS: Record<TransactionKind, { label: string; badgeClass: string; textClass: string }> = {
   income: {
@@ -71,7 +60,8 @@ const KIND_LABELS: Record<TransactionKind, { label: string; badgeClass: string; 
 }
 
 export const OperationalLogbook: React.FC = () => {
-  const { transactions, period, index, openQuickModal, openTransactionDetail } = useForja()
+  const { transactions, period, index, isModuleActive, openQuickModal, openTransactionDetail } = useForja()
+  const hasMoto = isModuleActive('moto')
 
   // Movimientos recientes del corte
   const periodTxs = transactions
@@ -88,7 +78,7 @@ export const OperationalLogbook: React.FC = () => {
           </div>
           <div>
             <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
-              BITÁCORA DE OPERACIONES DEL TALLER
+              {hasMoto ? 'BITÁCORA DE OPERACIONES DEL TALLER' : 'BITÁCORA DE MOVIMIENTOS RECIENTES'}
             </h3>
             <p className="text-[11px] text-slate-400 font-pixel">
               Registro secuencial de movimientos con partida doble en el corte {period.label}
@@ -110,7 +100,7 @@ export const OperationalLogbook: React.FC = () => {
         <EmptyState
           sprite="empty_bench"
           title="Bitácora en Blanco para este Ciclo"
-          description={`No hay movimientos asentados todavía para el corte ${period.label}. Registra tus primeros viajes, gasolina o compras de hoy.`}
+          description={`No hay movimientos asentados todavía para el corte ${period.label}. Registra tus primeros ingresos, gastos o compras de hoy.`}
           actionLabel="+ Forjar Primer Movimiento"
           onAction={() => openQuickModal()}
         />
@@ -119,7 +109,8 @@ export const OperationalLogbook: React.FC = () => {
           {periodTxs.map((tx) => {
             const desc = describeTransaction(tx, index)
             const meta = KIND_LABELS[tx.kind] || KIND_LABELS.expense
-            const spriteName = KIND_SPRITES[tx.kind] || 'tools'
+            const cat = desc.categoryId ? index.categories.get(desc.categoryId) : undefined
+            const itemColor = cat?.color || resolveCategoryColor(cat?.icon, cat?.name || tx.description, tx.kind, tx.isMoto)
 
             return (
               <div
@@ -136,10 +127,23 @@ export const OperationalLogbook: React.FC = () => {
                 title="Inspeccionar detalle y asientos contables"
                 className="bg-[#0f1715] hover:bg-[#152722] border border-[#213730] hover:border-emerald-600/50 p-2.5 sm:p-3 transition-all flex items-center justify-between gap-3 shadow-xs cursor-pointer group rounded-xs"
               >
-                {/* Lado izquierdo: Icono de tipo + Detalles */}
+                {/* Lado izquierdo: Icono de categoría dinámico + Detalles */}
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="p-1.5 rounded-sm bg-[#0a110f] border border-[#1f352e] shrink-0 shadow-inner">
-                    <PixelSprite name={spriteName} size={22} />
+                  <div
+                    className="w-8 h-8 rounded-xs border flex items-center justify-center shrink-0 shadow-inner"
+                    style={{
+                      borderColor: `${itemColor}50`,
+                      backgroundColor: `${itemColor}18`,
+                    }}
+                  >
+                    <CategoryIcon
+                      icon={cat?.icon}
+                      categoryName={cat?.name || tx.description}
+                      kind={tx.kind}
+                      isMoto={tx.isMoto}
+                      size={18}
+                      color={itemColor}
+                    />
                   </div>
 
                   <div className="min-w-0">

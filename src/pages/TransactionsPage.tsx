@@ -7,6 +7,7 @@ import { describeTransaction } from '../domain/ledger/aggregate'
 import { isDateInPeriod } from '../domain/period'
 import { exportTransactionsToCSV, downloadFile } from '../services/exportImport'
 import { PixelSprite } from '../components/common/PixelSprite'
+import { CategoryIcon, resolveCategoryColor } from '../components/common/CategoryIcon'
 import { EmptyState } from '../components/common/EmptyState'
 import { sound } from '../services/sound'
 import { triggerButtonSparks, triggerPixelSparks } from '../components/common/PixelSparks'
@@ -72,25 +73,6 @@ export const TransactionsPage: React.FC = () => {
       setDeleteError((err as Error).message || 'Error al desmantelar el movimiento')
     } finally {
       setIsDeleting(false)
-    }
-  }
-
-  const getSpriteForTransaction = (kind: string, isMoto: boolean) => {
-    if (isMoto) return <PixelSprite name="moto" size={16} />
-    switch (kind) {
-      case 'income':
-        return <PixelSprite name="coins" size={16} />
-      case 'expense':
-        return <PixelSprite name="wrench" size={16} />
-      case 'transfer':
-        return <PixelSprite name="conveyor" size={16} />
-      case 'debt_payment':
-        return <PixelSprite name="creditCard" size={16} />
-      case 'loan_given':
-      case 'loan_repayment':
-        return <PixelSprite name="handshake" size={16} />
-      default:
-        return <PixelSprite name="coins" size={16} />
     }
   }
 
@@ -242,21 +224,44 @@ export const TransactionsPage: React.FC = () => {
                         {formatShortDate(tx.date, true)}
                       </td>
                       <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1 rounded bg-[#0d1614] border border-[#213731] shrink-0 group-hover:border-emerald-600/50">
-                            {getSpriteForTransaction(tx.kind, tx.isMoto)}
-                          </div>
-                          <div>
-                            <span className="font-medium text-slate-100 text-xs group-hover:text-emerald-300 transition-colors">{tx.description}</span>
-                            {tx.notes && (
-                              <p className="text-[11px] text-slate-500 italic mt-0.5">{tx.notes}</p>
-                            )}
-                          </div>
-                        </div>
+                        {(() => {
+                          const itemColor = cat?.color || resolveCategoryColor(cat?.icon, cat?.name || tx.description, tx.kind, tx.isMoto)
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="p-1 rounded bg-[#0d1614] border shrink-0 group-hover:border-emerald-600/50 flex items-center justify-center w-7 h-7"
+                                style={{ borderColor: `${itemColor}50`, backgroundColor: `${itemColor}15` }}
+                              >
+                                <CategoryIcon
+                                  icon={cat?.icon}
+                                  categoryName={cat?.name || tx.description}
+                                  kind={tx.kind}
+                                  isMoto={tx.isMoto}
+                                  size={16}
+                                  color={itemColor}
+                                />
+                              </div>
+                              <div>
+                                <span className="font-medium text-slate-100 text-xs group-hover:text-emerald-300 transition-colors">{tx.description}</span>
+                                {tx.notes && (
+                                  <p className="text-[11px] text-slate-500 italic mt-0.5">{tx.notes}</p>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="py-2.5 px-3 whitespace-nowrap text-slate-300 text-xs">
                         {cat ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#101d18] border border-[#1e342c] text-emerald-300 text-[11px]">
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px]"
+                            style={{
+                              borderColor: `${cat.color}50`,
+                              backgroundColor: `${cat.color}15`,
+                              color: cat.color || '#6ee7b7',
+                            }}
+                          >
+                            <CategoryIcon icon={cat.icon} categoryName={cat.name} size={12} color={cat.color} />
                             {cat.name}
                           </span>
                         ) : (

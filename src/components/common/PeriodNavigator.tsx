@@ -6,10 +6,10 @@ import { PixelSprite } from './PixelSprite'
 import { sound } from '../../services/sound'
 
 export const PeriodNavigator: React.FC = () => {
-  const { period, goToPreviousPeriod, goToNextPeriod, resetToCurrentPeriod } = useForja()
-  const currentPeriod = getCurrentPeriod()
+  const { period, preferences, goToPreviousPeriod, goToNextPeriod, resetToCurrentPeriod } = useForja()
+  const currentPeriod = getCurrentPeriod(new Date(), preferences.cycleConfig)
   const isCurrent = period.id === currentPeriod.id
-  const canGoNext = canNavigateToNextPeriod(period, new Date())
+  const canGoNext = canNavigateToNextPeriod(period, new Date(), preferences.cycleConfig)
 
   const handlePrev = () => {
     sound.playClick()
@@ -34,7 +34,7 @@ export const PeriodNavigator: React.FC = () => {
     <div className="flex items-center gap-1.5 bg-[#0a1210] border-2 border-[#1e342c] rounded-sm p-1 shadow-inner">
       <button
         onClick={handlePrev}
-        title="Corte anterior (11 al 10)"
+        title="Corte contable anterior"
         className="p-1.5 rounded-xs text-slate-400 hover:text-emerald-300 hover:bg-[#14231f] transition-all cursor-pointer active:translate-y-0.5"
         aria-label="Corte anterior"
       >
@@ -68,7 +68,7 @@ export const PeriodNavigator: React.FC = () => {
       <button
         onClick={handleNext}
         disabled={!canGoNext}
-        title={canGoNext ? "Corte siguiente (11 al 10)" : "Corte activo — No se admiten cortes futuros"}
+        title={canGoNext ? "Corte contable siguiente" : "Corte activo — No se admiten cortes futuros"}
         className={`p-1.5 rounded-xs transition-all ${
           canGoNext
             ? 'text-slate-400 hover:text-emerald-300 hover:bg-[#14231f] cursor-pointer active:translate-y-0.5'

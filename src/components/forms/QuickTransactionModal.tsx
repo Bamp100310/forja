@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { X, AlertCircle } from 'lucide-react'
+import { X, AlertCircle, ArrowRightLeft, Handshake } from 'lucide-react'
 import { PixelSprite } from '../common/PixelSprite'
+import { CategoryIcon, resolveCategoryColor } from '../common/CategoryIcon'
 import { useForja } from '../../context/ForjaContext'
 import { MoneyInput } from './MoneyInput'
 import { buildTransactionDraft, type OperationInput } from '../../domain/ledger/operations'
@@ -25,6 +26,8 @@ interface TxMetaDetails {
   toAccountId?: string
   debtId?: string
   loanId?: string
+  fromLoanId?: string
+  toDebtId?: string
   payment?: {
     method?: string
     accountId?: string
@@ -50,7 +53,67 @@ export const QuickTransactionModal: React.FC = () => {
     debts,
     loans,
     balances,
+    isModuleActive,
   } = useForja()
+
+  const hasMoto = isModuleActive('moto')
+  const incomeCategories = useMemo(() => {
+    const filtered = categories.filter((c) => c.kind === 'income' && !c.isArchived && (hasMoto || !c.isMoto))
+    const list = filtered.length > 0 ? filtered : categories.filter((c) => c.kind === 'income' && !c.isArchived)
+    const seen = new Set<string>()
+    const deduplicated = list.filter((c) => {
+      const k = c.name.toLowerCase().trim()
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    return deduplicated.sort((a, b) => {
+      if (Boolean(a.isMoto) !== Boolean(b.isMoto)) {
+        return a.isMoto ? 1 : -1
+      }
+      return a.sortOrder - b.sortOrder
+    })
+  }, [categories, hasMoto])
+
+  const expenseCategories = useMemo(() => {
+    const filtered = categories.filter((c) => c.kind === 'expense' && !c.isArchived && (hasMoto || !c.isMoto))
+    const list = filtered.length > 0 ? filtered : categories.filter((c) => c.kind === 'expense' && !c.isArchived)
+    const seen = new Set<string>()
+    const deduplicated = list.filter((c) => {
+      const k = c.name.toLowerCase().trim()
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    return deduplicated.sort((a, b) => {
+      if (Boolean(a.isMoto) !== Boolean(b.isMoto)) {
+        return a.isMoto ? 1 : -1
+      }
+      return a.sortOrder - b.sortOrder
+    })
+  }, [categories, hasMoto])
+
+  const defaultExpenseCategory = useMemo(() => {
+    if (expenseCategories.length === 0) return null
+    const foodCat = expenseCategories.find((c) => {
+      const n = c.name.toLowerCase()
+      return !c.isMoto && (n.includes('aliment') || n.includes('comida') || n.includes('pizza') || n.includes('mercado'))
+    })
+    if (foodCat) return foodCat
+    const nonMoto = expenseCategories.find((c) => !c.isMoto)
+    return nonMoto || expenseCategories[0]
+  }, [expenseCategories])
+
+  const defaultIncomeCategory = useMemo(() => {
+    if (incomeCategories.length === 0) return null
+    const salaryCat = incomeCategories.find((c) => {
+      const n = c.name.toLowerCase()
+      return n.includes('salario') || n.includes('nómina') || n.includes('sueldo')
+    })
+    if (salaryCat) return salaryCat
+    const nonMoto = incomeCategories.find((c) => !c.isMoto)
+    return nonMoto || incomeCategories[0]
+  }, [incomeCategories])
 
   const [kind, setKind] = useState<TransactionKind>(quickModalKind)
   const [date, setDate] = useState<string>(today)
@@ -67,15 +130,19 @@ export const QuickTransactionModal: React.FC = () => {
   const [toAccountId, setToAccountId] = useState<string>('')
   const [fee, setFee] = useState<number>(0)
 
-  // Deudas
+  // Deudas y Cruce con Préstamos
   const [debtId, setDebtId] = useState<string>('')
   const [paymentMethod, setPaymentMethod] = useState<'account' | 'debt'>('account')
+  const [debtFundingSource, setDebtFundingSource] = useState<'account' | 'loan'>('account')
+  const [fromLoanId, setFromLoanId] = useState<string>('')
   const [principal, setPrincipal] = useState<number>(0)
   const [interest, setInterest] = useState<number>(0)
   const [debtFees, setDebtFees] = useState<number>(0)
 
   // Préstamos y Cobros de plataforma
   const [collectionSource, setCollectionSource] = useState<'platform' | 'loan'>('platform')
+  const [loanRepaymentDest, setLoanRepaymentDest] = useState<'account' | 'debt'>('account')
+  const [toDebtId, setToDebtId] = useState<string>('')
   const [platformAccountId, setPlatformAccountId] = useState<string>('')
   const [loanId, setLoanId] = useState<string>('')
   const [loanPersonName, setLoanPersonName] = useState<string>('')
@@ -97,6 +164,21 @@ export const QuickTransactionModal: React.FC = () => {
     () => (platformAccountId ? balances.accountBalance.get(platformAccountId) ?? 0 : 0),
     [platformAccountId, balances.accountBalance]
   )
+  const selectedCat = useMemo(
+    () => categories.find((c) => c.id === categoryId),
+    [categories, categoryId]
+  )
+  const selectedCatColor = useMemo(() => {
+    if (!selectedCat) return undefined
+    const isDark =
+      selectedCat.color &&
+      (selectedCat.color === '#000000' ||
+        selectedCat.color === '#000' ||
+        selectedCat.color === '#111111' ||
+        selectedCat.color.toLowerCase() === 'black')
+    if (selectedCat.color && !isDark) return selectedCat.color
+    return resolveCategoryColor(selectedCat.icon, selectedCat.name, kind, selectedCat.isMoto)
+  }, [selectedCat, kind])
 
   const isNewLoan =
     kind === 'loan_given' &&
@@ -155,15 +237,23 @@ export const QuickTransactionModal: React.FC = () => {
           setToAccountId(meta.toAccountId || dstPosting?.targetId || accounts[1]?.id || '')
         } else if (editingTransaction.kind === 'debt_payment') {
           const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan' && p.amount < 0)
           const debtPosting = editingTransaction.postings.find((p) => p.targetType === 'debt')
           const intPosting = editingTransaction.postings.find((p) => p.role === 'interest')
           const feePosting = editingTransaction.postings.find((p) => p.role === 'fee')
+
+          if (loanPosting || meta.fromLoanId) {
+            setDebtFundingSource('loan')
+            setFromLoanId(meta.fromLoanId || loanPosting?.targetId || loans[0]?.id || '')
+          } else {
+            setDebtFundingSource('account')
+            setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+          }
 
           setPrincipal(Number(meta.principal ?? (debtPosting ? debtPosting.amount : 0)))
           setInterest(Number(meta.interest ?? (intPosting ? intPosting.amount : 0)))
           setDebtFees(Number(meta.fees ?? (feePosting ? feePosting.amount : 0)))
           setDebtId(meta.debtId || debtPosting?.targetId || editingTransaction.debtId || debts[0]?.id || '')
-          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
         } else if (editingTransaction.kind === 'loan_given') {
           const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan')
           const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
@@ -176,19 +266,31 @@ export const QuickTransactionModal: React.FC = () => {
           setLoanDueDate(targetLoan?.dueDate || meta.newLoan?.dueDate || '')
         } else if (editingTransaction.kind === 'loan_repayment') {
           const accPosting = editingTransaction.postings.find((p) => p.targetType === 'account')
+          const debtPosting = editingTransaction.postings.find((p) => p.targetType === 'debt' && p.amount > 0)
           const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan')
           const intPosting = editingTransaction.postings.find((p) => p.role === 'interest')
 
           setCollectionSource('loan')
+          if (debtPosting || meta.toDebtId) {
+            setLoanRepaymentDest('debt')
+            setToDebtId(meta.toDebtId || debtPosting?.targetId || debts[0]?.id || '')
+          } else {
+            setLoanRepaymentDest('account')
+            setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
+          }
+
           setPrincipal(Number(meta.principal ?? (loanPosting ? Math.abs(loanPosting.amount) : 0)))
           setInterest(Number(meta.interest ?? (intPosting ? Math.abs(intPosting.amount) : 0)))
           setLoanId(meta.loanId || loanPosting?.targetId || editingTransaction.loanId || (loans[0]?.id ?? ''))
-          setAccountId(meta.accountId || accPosting?.targetId || accounts[0]?.id || '')
         }
       } else {
         // Inicialización habitual para nuevo movimiento
         setKind(quickModalKind)
-        setDate(today)
+        setDate(quickModalPrefill?.date || today)
+        setDebtFundingSource('account')
+        setFromLoanId(loans.length > 0 ? loans[0].id : '')
+        setLoanRepaymentDest('account')
+        setToDebtId(debts.length > 0 ? debts[0].id : '')
         setNotes(quickModalPrefill?.notes || '')
         setCommission(0)
         setTip(0)
@@ -267,20 +369,33 @@ export const QuickTransactionModal: React.FC = () => {
         }
 
         // Seleccionar valores por defecto de categorías
-        const incCats = categories.filter((c) => c.kind === 'income' && !c.isArchived)
-        const expCats = categories.filter((c) => c.kind === 'expense' && !c.isArchived)
+        const incCats = incomeCategories
+        const expCats = expenseCategories
         if (quickModalKind === 'income' && incCats.length > 0) {
-          setCategoryId(incCats[0].id)
-          setIsMoto(Boolean(incCats[0].isMoto))
+          const targetCat = quickModalPrefill?.categoryId
+            ? incCats.find((c) => c.id === quickModalPrefill.categoryId) || defaultIncomeCategory || incCats[0]
+            : defaultIncomeCategory || incCats[0]
+
+          setCategoryId(targetCat.id)
+          if (quickModalPrefill?.isMoto !== undefined) {
+            setIsMoto(quickModalPrefill.isMoto)
+          } else {
+            setIsMoto(Boolean(targetCat.isMoto))
+          }
         } else if (quickModalKind === 'expense' && expCats.length > 0) {
-          setCategoryId(expCats[0].id)
-          setIsMoto(Boolean(expCats[0].isMoto))
+          const targetCat = quickModalPrefill?.categoryId
+            ? expCats.find((c) => c.id === quickModalPrefill.categoryId) || defaultExpenseCategory || expCats[0]
+            : defaultExpenseCategory || expCats[0]
+          setCategoryId(targetCat.id)
+          setIsMoto(Boolean(targetCat.isMoto))
         }
 
         if (accounts.length > 0) {
-          setAccountId(
-            quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
-          )
+          const preferredAccount =
+            quickModalKind === 'income'
+              ? quickModalPrefill?.toAccountId || quickModalPrefill?.accountId || accounts[0].id
+              : quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
+          setAccountId(preferredAccount)
           if (accounts.length > 1 && !quickModalPrefill?.toAccountId) {
             setToAccountId(accounts[1].id)
           }
@@ -304,6 +419,10 @@ export const QuickTransactionModal: React.FC = () => {
     quickModalPrefill,
     today,
     categories,
+    incomeCategories,
+    expenseCategories,
+    defaultIncomeCategory,
+    defaultExpenseCategory,
     accounts,
     debts,
     loans,
@@ -328,13 +447,13 @@ export const QuickTransactionModal: React.FC = () => {
     )
     setKind(nextKind)
     if (nextKind === 'income') {
-      const inc = categories.find((c) => c.kind === 'income' && !c.isArchived)
+      const inc = defaultIncomeCategory || incomeCategories[0]
       if (inc) {
         setCategoryId(inc.id)
         setIsMoto(Boolean(inc.isMoto))
       }
     } else if (nextKind === 'expense') {
-      const exp = categories.find((c) => c.kind === 'expense' && !c.isArchived)
+      const exp = defaultExpenseCategory || expenseCategories[0]
       if (exp) {
         setCategoryId(exp.id)
         setIsMoto(Boolean(exp.isMoto))
@@ -385,6 +504,8 @@ export const QuickTransactionModal: React.FC = () => {
           amount,
           commission: commission > 0 ? commission : undefined,
           tip: tip > 0 ? tip : undefined,
+          payrollScheduleId: quickModalPrefill?.payrollScheduleId || null,
+          expectedPaydayDate: quickModalPrefill?.expectedPaydayDate || null,
         }
       } else if (kind === 'expense') {
         if (amount <= 0) {
@@ -439,23 +560,49 @@ export const QuickTransactionModal: React.FC = () => {
         if (!debtId) {
           throw new Error('Selecciona la obligación o pasivo a pagar.')
         }
-        if (!accountId) {
-          throw new Error('Selecciona la bóveda con la que realizas el pago.')
-        }
-        const totalPayment = principal + (interest || 0) + (debtFees || 0)
-        if (totalPayment <= 0) {
-          throw new Error('El pago de deuda debe ser mayor que cero (ingresa abono a capital, intereses o cargos).')
-        }
-        op = {
-          kind: 'debt_payment',
-          date,
-          description: description.trim() || 'Pago de deuda',
-          notes: notes.trim() || null,
-          debtId,
-          accountId,
-          principal,
-          interest: interest > 0 ? interest : undefined,
-          fees: debtFees > 0 ? debtFees : undefined,
+
+        if (debtFundingSource === 'loan') {
+          if (!fromLoanId) {
+            throw new Error('Selecciona el préstamo a favor con el que realizas la compensación o cruce.')
+          }
+          if (principal <= 0) {
+            throw new Error('Ingresa el monto del préstamo a abonar a la deuda.')
+          }
+          const d = debts.find((x) => x.id === debtId)
+          const l = loans.find((x) => x.id === fromLoanId)
+          op = {
+            kind: 'debt_payment',
+            date,
+            description:
+              description.trim() ||
+              `Cruce: Abono a ${d?.name || 'deuda'} con préstamo de ${l?.personName || 'deudor'}`,
+            notes: notes.trim() || null,
+            debtId,
+            accountId: null,
+            fromLoanId,
+            principal,
+            interest: interest > 0 ? interest : undefined,
+            fees: debtFees > 0 ? debtFees : undefined,
+          }
+        } else {
+          if (!accountId) {
+            throw new Error('Selecciona la bóveda con la que realizas el pago.')
+          }
+          const totalPayment = principal + (interest || 0) + (debtFees || 0)
+          if (totalPayment <= 0) {
+            throw new Error('El pago de deuda debe ser mayor que cero (ingresa abono a capital, intereses o cargos).')
+          }
+          op = {
+            kind: 'debt_payment',
+            date,
+            description: description.trim() || 'Pago de deuda',
+            notes: notes.trim() || null,
+            debtId,
+            accountId,
+            principal,
+            interest: interest > 0 ? interest : undefined,
+            fees: debtFees > 0 ? debtFees : undefined,
+          }
         }
       } else if (kind === 'loan_given') {
         if (amount <= 0) {
@@ -535,23 +682,47 @@ export const QuickTransactionModal: React.FC = () => {
           if (!loanId || loanId === '__new__' || !loans.some((l) => l.id === loanId)) {
             throw new Error('Selecciona el préstamo o deudor correspondiente.')
           }
-          if (!accountId) {
-            throw new Error('Selecciona la bóveda donde recibes el dinero.')
-          }
-          const total = principal + (interest || 0)
-          if (total <= 0) {
-            throw new Error('La devolución debe ser mayor que cero (ingresa capital o intereses).')
-          }
           const debtorName = loans.find((l) => l.id === loanId)?.personName || 'deudor'
-          op = {
-            kind: 'loan_repayment',
-            date,
-            description: description.trim() || `Devolución de préstamo de ${debtorName}`,
-            notes: notes.trim() || null,
-            loanId,
-            accountId,
-            principal,
-            interest: interest > 0 ? interest : undefined,
+
+          if (loanRepaymentDest === 'debt') {
+            if (!toDebtId) {
+              throw new Error('Selecciona la deuda propia a la que abonas el valor del préstamo.')
+            }
+            if (principal <= 0) {
+              throw new Error('Ingresa el capital a cruzar contra la deuda.')
+            }
+            const debtName = debts.find((d) => d.id === toDebtId)?.name || 'deuda'
+            op = {
+              kind: 'loan_repayment',
+              date,
+              description:
+                description.trim() ||
+                `Cruce: Cobro a ${debtorName} aplicado a ${debtName}`,
+              notes: notes.trim() || null,
+              loanId,
+              accountId: null,
+              toDebtId,
+              principal,
+              interest: interest > 0 ? interest : undefined,
+            }
+          } else {
+            if (!accountId) {
+              throw new Error('Selecciona la bóveda donde recibes el dinero.')
+            }
+            const total = principal + (interest || 0)
+            if (total <= 0) {
+              throw new Error('La devolución debe ser mayor que cero (ingresa capital o intereses).')
+            }
+            op = {
+              kind: 'loan_repayment',
+              date,
+              description: description.trim() || `Devolución de préstamo de ${debtorName}`,
+              notes: notes.trim() || null,
+              loanId,
+              accountId,
+              principal,
+              interest: interest > 0 ? interest : undefined,
+            }
           }
         }
       } else {
@@ -638,7 +809,7 @@ export const QuickTransactionModal: React.FC = () => {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
               }`}
             >
-              <PixelSprite name="jerrycan" size={18} />
+              <PixelSprite name="parcel" size={18} />
               <span>GASTO</span>
             </button>
             <button
@@ -719,7 +890,23 @@ export const QuickTransactionModal: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Ej. Gasolina Terpel / Rappi tarde"
+                  placeholder={
+                    kind === 'expense'
+                      ? isMoto
+                        ? 'Ej. Gasolina Terpel / Repuestos moto'
+                        : 'Ej. Pizza a domicilio / Mercado / Almuerzo'
+                      : kind === 'income'
+                      ? isMoto
+                        ? 'Ej. Turno Rappi / DiDi'
+                        : 'Ej. Quincena nómina fija / Honorarios'
+                      : kind === 'transfer'
+                      ? 'Ej. Traslado a efectivo o ahorros'
+                      : kind === 'debt_payment'
+                      ? 'Ej. Abono tarjeta / Pago cuota préstamo'
+                      : kind === 'loan_given'
+                      ? 'Ej. Préstamo a familiar o amigo'
+                      : 'Ej. Cobro o abono recibido'
+                  }
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
@@ -757,20 +944,51 @@ export const QuickTransactionModal: React.FC = () => {
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                       CATEGORÍA / FUENTE
                     </label>
-                    <select
-                      value={categoryId}
-                      onChange={handleCategoryChange}
-                      required
-                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                    >
-                      {categories
-                        .filter((c) => c.kind === 'income' && !c.isArchived)
-                        .map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} {c.isMoto ? '🏍️' : ''}
-                          </option>
-                        ))}
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
+                        style={selectedCatColor ? { borderColor: `${selectedCatColor}50`, backgroundColor: `${selectedCatColor}18` } : undefined}
+                      >
+                        <CategoryIcon
+                          icon={selectedCat?.icon}
+                          categoryName={selectedCat?.name}
+                          kind="income"
+                          size={18}
+                          color={selectedCatColor}
+                        />
+                      </div>
+                      <select
+                        value={categoryId}
+                        onChange={handleCategoryChange}
+                        required
+                        className="flex-1 bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                      >
+                        {incomeCategories.some((c) => !c.isMoto) && incomeCategories.some((c) => c.isMoto) ? (
+                          <>
+                            <optgroup label="── Personales y Nómina ──">
+                              {incomeCategories.filter((c) => !c.isMoto).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="── Plataformas y Domicilios ──">
+                              {incomeCategories.filter((c) => c.isMoto).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name} 🏍️
+                                </option>
+                              ))}
+                            </optgroup>
+                          </>
+                        ) : (
+                          incomeCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} {c.isMoto ? '🏍️' : ''}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
@@ -808,20 +1026,51 @@ export const QuickTransactionModal: React.FC = () => {
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                       CATEGORÍA
                     </label>
-                    <select
-                      value={categoryId}
-                      onChange={handleCategoryChange}
-                      required
-                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                    >
-                      {categories
-                        .filter((c) => c.kind === 'expense' && !c.isArchived)
-                        .map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} {c.isMoto ? '🏍️' : ''}
-                          </option>
-                        ))}
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
+                        style={selectedCatColor ? { borderColor: `${selectedCatColor}50`, backgroundColor: `${selectedCatColor}18` } : undefined}
+                      >
+                        <CategoryIcon
+                          icon={selectedCat?.icon}
+                          categoryName={selectedCat?.name}
+                          kind="expense"
+                          size={18}
+                          color={selectedCatColor}
+                        />
+                      </div>
+                      <select
+                        value={categoryId}
+                        onChange={handleCategoryChange}
+                        required
+                        className="flex-1 bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                      >
+                        {expenseCategories.some((c) => !c.isMoto) && expenseCategories.some((c) => c.isMoto) ? (
+                          <>
+                            <optgroup label="── Cotidianos y Personales ──">
+                              {expenseCategories.filter((c) => !c.isMoto).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="── Taller y Operación Moto ──">
+                              {expenseCategories.filter((c) => c.isMoto).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name} 🏍️
+                                </option>
+                              ))}
+                            </optgroup>
+                          </>
+                        ) : (
+                          expenseCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} {c.isMoto ? '🏍️' : ''}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
                   </div>
 
                   <div>
@@ -955,7 +1204,7 @@ export const QuickTransactionModal: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                          OBLIGACIÓN / PASIVO
+                          OBLIGACIÓN / PASIVO A ABONAR
                         </label>
                         <select
                           value={debtId}
@@ -965,29 +1214,91 @@ export const QuickTransactionModal: React.FC = () => {
                         >
                           {debts.map((d) => (
                             <option key={d.id} value={d.id}>
-                              {d.name} ({d.institution || 'Entidad'})
+                              {d.name} ({d.institution || 'Entidad'}) — Saldo: {formatCOP(balances.debtBalance.get(d.id) || 0)}
                             </option>
                           ))}
                         </select>
                       </div>
+
                       <div>
-                        <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                          BÓVEDA DE PAGO
-                        </label>
-                        <select
-                          value={accountId}
-                          onChange={(e) => setAccountId(e.target.value)}
-                          required
-                          className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                        >
-                          {accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                            FONDEAR PAGO CON
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setDebtFundingSource('account')}
+                              className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                                debtFundingSource === 'account'
+                                  ? 'bg-[#1b2f27] text-emerald-300 border border-emerald-600'
+                                  : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              Bóveda
+                            </button>
+                            {loans.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDebtFundingSource('loan')
+                                  if (!fromLoanId && loans.length > 0) setFromLoanId(loans[0].id)
+                                }}
+                                className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors flex items-center gap-1 cursor-pointer ${
+                                  debtFundingSource === 'loan'
+                                    ? 'bg-[#261730] text-purple-300 border border-purple-600 font-bold'
+                                    : 'text-slate-400 hover:text-purple-300'
+                                }`}
+                                title="Compensar contra dinero que te deben (Cruce de cuentas)"
+                              >
+                                <Handshake size={10} />
+                                Cruzar préstamo ({loans.length})
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {debtFundingSource === 'account' ? (
+                          <select
+                            value={accountId}
+                            onChange={(e) => setAccountId(e.target.value)}
+                            required
+                            className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                          >
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            value={fromLoanId}
+                            onChange={(e) => setFromLoanId(e.target.value)}
+                            required
+                            className="w-full bg-[#0f0914] border border-purple-700 rounded-xs p-2 text-xs font-pixel text-purple-200 focus:outline-none focus:border-purple-400"
+                          >
+                            {loans.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.personName} (Por cobrar: {formatCOP(balances.loanPending.get(l.id) || 0)})
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                     </div>
+
+                    {debtFundingSource === 'loan' && (
+                      <div className="p-2.5 bg-[#170e1c] border border-purple-700/60 rounded-xs text-[11px] text-purple-200 font-pixel flex items-start gap-2">
+                        <Handshake size={15} className="shrink-0 mt-0.5 text-purple-400" />
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-purple-300 block">COMPENSACIÓN DIRECTA DE SALDOS (CRUCE DE CUENTAS)</span>
+                          <p className="text-slate-300 text-[10px] leading-tight">
+                            Este movimiento amortiza tu deuda descontándola del préstamo por cobrar que le hiciste a esa persona. No se requiere mover dinero en efectivo ni bancario.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
@@ -1314,23 +1625,84 @@ export const QuickTransactionModal: React.FC = () => {
                             </select>
                           </div>
                           <div>
-                            <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                              BÓVEDA DONDE RECIBO EL DINERO
-                            </label>
-                            <select
-                              value={accountId}
-                              onChange={(e) => setAccountId(e.target.value)}
-                              required
-                              className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                            >
-                              {accounts.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                                DESTINO DEL COBRO
+                              </label>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setLoanRepaymentDest('account')}
+                                  className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                                    loanRepaymentDest === 'account'
+                                      ? 'bg-[#1b2f27] text-emerald-300 border border-emerald-600'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                >
+                                  Bóveda
+                                </button>
+                                {debts.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setLoanRepaymentDest('debt')
+                                      if (!toDebtId && debts.length > 0) setToDebtId(debts[0].id)
+                                    }}
+                                    className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors flex items-center gap-1 cursor-pointer ${
+                                      loanRepaymentDest === 'debt'
+                                        ? 'bg-[#2a1d0b] text-amber-300 border border-amber-600 font-bold'
+                                        : 'text-slate-400 hover:text-amber-300'
+                                    }`}
+                                    title="Cruzar para abonar a una deuda que tú tienes (compensación de deudas)"
+                                  >
+                                    <ArrowRightLeft size={10} />
+                                    Abonar a mi deuda ({debts.length})
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {loanRepaymentDest === 'account' ? (
+                              <select
+                                value={accountId}
+                                onChange={(e) => setAccountId(e.target.value)}
+                                required
+                                className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                              >
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <select
+                                value={toDebtId}
+                                onChange={(e) => setToDebtId(e.target.value)}
+                                required
+                                className="w-full bg-[#140e06] border border-amber-700 rounded-xs p-2 text-xs font-pixel text-amber-200 focus:outline-none focus:border-amber-400"
+                              >
+                                {debts.map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.name} (Saldo adeudado: {formatCOP(balances.debtBalance.get(d.id) || 0)})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </div>
                         </div>
+
+                        {loanRepaymentDest === 'debt' && (
+                          <div className="p-2.5 bg-[#1a1208] border border-amber-700/60 rounded-xs text-[11px] text-amber-200 font-pixel flex items-start gap-2">
+                            <ArrowRightLeft size={15} className="shrink-0 mt-0.5 text-amber-400" />
+                            <div className="space-y-0.5">
+                              <span className="font-bold text-amber-300 block">CRUCE DIRECTO CONTRA DEUDA PROPIA</span>
+                              <p className="text-slate-300 text-[10px] leading-tight">
+                                La devolución de este préstamo se aplica directamente como abono a tu deuda seleccionada, extinguiendo ambos saldos de manera cruzada sin movimientos bancarios.
+                              </p>
+                            </div>
+                          </div>
+                        )}
 
                         <div>
                           <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">

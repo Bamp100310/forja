@@ -96,7 +96,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       </div>
 
       <div className="mt-1">
-        <div className={`font-pixel font-bold num text-xl sm:text-2xl tracking-tight ${styles.amount}`}>
+        <div className={`num font-bold text-xl sm:text-2xl tracking-tight ${styles.amount}`}>
           {formatCOP(amount)}
         </div>
         {subtitle && (
