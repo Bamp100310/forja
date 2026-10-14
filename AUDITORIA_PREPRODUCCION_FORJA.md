@@ -232,6 +232,8 @@ Comando ejecutado: `npx vitest run --reporter=verbose`
     * *Motivo:* Subsanar error `duplicate key value violates unique constraint "transactions_pkey"` al editar movimientos en Supabase. Se preserva el `client_request_id` original al guardar modificaciones y se incorpora un mecanismo de fallback resiliente con actualización directa de cabecera y reemplazo de asientos balanceados en caso de que la función remota `save_transaction_atomic` aún no cuente con la migración 20261013000000.
 20. `src/components/forms/QuickTransactionModal.tsx`, `src/pages/AccountsPage.tsx`, `src/components/dashboard/ResourceGaugesGrid.tsx`, `src/context/ForjaContext.tsx`:
     * *Motivo:* Implementación del flujo de cobro y liquidación de saldos en plataformas de reparto (Rappi, DiDi). Habilita en la pestaña «COBRAR» la selección entre plataformas o préstamos, selección de monto parcial o total (para cobros de pedidos pagados en efectivo en mano), selección de bóveda de destino (Efectivo/Caja por defecto) y botones de acción directos en las tarjetas de bóvedas por cobrar.
+21. `src/index.css`, `package.json`:
+    * *Motivo:* Rediseño tipográfico integral del producto para eliminar el problema de legibilidad en números y caracteres donde el '5' se confundía con el '8' en `Pixelify Sans`. Se sustituyó por `DotGothic16` (auténtica tipografía pixel art de 16-bit de videojuegos retro) optimizada con subconjuntos `latin` y `latin-ext`. Los números ahora cuentan con apertura clara y separación nítida de bucles, el texto en cajas de diálogo e inputs es completamente legible y se preserva al 100% la estética de taller industrial pixel art, reduciendo además el bundle CSS de 246 kB a 99 kB.
 
 ---
 

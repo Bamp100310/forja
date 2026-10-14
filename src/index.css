@@ -1,8 +1,6 @@
 @import "tailwindcss";
-@import "@fontsource/pixelify-sans/400.css";
-@import "@fontsource/pixelify-sans/500.css";
-@import "@fontsource/pixelify-sans/600.css";
-@import "@fontsource/pixelify-sans/700.css";
+@import "@fontsource/dotgothic16/latin.css";
+@import "@fontsource/dotgothic16/latin-ext.css";
 @import "@fontsource/silkscreen";
 @import "@fontsource/jersey-10";
 
@@ -12,7 +10,7 @@
    Materiales: carbón (fondo), acero envejecido (paneles), madera de nogal
    (marca y cabeceras), cobre/latón (acciones), verdín (positivo), óxido
    (salidas), petróleo (movimientos neutros). Pergamino para la bitácora.
-   Tipos: Pixelify Sans (voz del videojuego y rotulación contundente),
+   Tipos: DotGothic16 (pixel art auténtico 16-bit legible en números y texto),
    Silkscreen (etiquetas estarcidas de maquinaria), Jersey 10 (rótulos display).
    ========================================================================== */
 
@@ -21,8 +19,8 @@
    Las redirigimos a los materiales del taller para que TODO el producto
    comparta paleta sin reescribir cada clase. */
 @theme {
-  --font-sans: 'Pixelify Sans', system-ui, sans-serif;
-  --font-mono: 'Pixelify Sans', ui-monospace, monospace;
+  --font-sans: 'DotGothic16', system-ui, sans-serif;
+  --font-mono: 'DotGothic16', ui-monospace, monospace;
 
   --text-xs: 0.8125rem;
   --text-xs--line-height: 1.15rem;
@@ -177,11 +175,11 @@
   --paper-ink: #2b241b;
   --paper-ink-2: #6a5c46;
 
-  --font-display: 'Jersey 10', 'Pixelify Sans', monospace;
+  --font-display: 'Jersey 10', 'DotGothic16', monospace;
   --font-stencil: 'Silkscreen', monospace;
-  --font-body: 'Pixelify Sans', system-ui, sans-serif;
-  --font-pixel: 'Pixelify Sans', system-ui, sans-serif;
-  --font-num: 'Pixelify Sans', ui-monospace, monospace;
+  --font-body: 'DotGothic16', system-ui, sans-serif;
+  --font-pixel: 'DotGothic16', system-ui, sans-serif;
+  --font-num: 'DotGothic16', ui-monospace, monospace;
 
   /* Esquinas escalonadas tipo pixel art (3px) */
   --px-corners: polygon(
@@ -257,14 +255,14 @@ body {
   text-transform: uppercase;
 }
 
-/* `.font-pixel` es la voz auténtica de videojuego: Pixelify Sans */
+/* `.font-pixel` es la voz de videojuego pixel art (DotGothic16) */
 .font-pixel {
-  font-family: 'Pixelify Sans', system-ui, sans-serif;
+  font-family: var(--font-pixel);
   letter-spacing: 0.02em;
 }
 
 .num {
-  font-family: 'Pixelify Sans', ui-monospace, monospace;
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
@@ -389,7 +387,7 @@ body {
   gap: 0.5rem;
   min-height: 36px;
   padding: 0.45rem 1rem;
-  font-family: 'Pixelify Sans', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-weight: 700;
   font-size: 0.8125rem;
   letter-spacing: 0.05em;
@@ -575,7 +573,7 @@ body {
   gap: 0.4rem;
   padding: 0.35rem 0.6rem;
   color: var(--ash);
-  font-family: 'Pixelify Sans', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-weight: 600;
   transition: color 120ms, background-color 120ms;
   clip-path: var(--px-corners-sm);
@@ -609,7 +607,7 @@ textarea {
   background-color: #070c0a;
   border: 1px solid #273e34;
   color: #f3ede2;
-  font-family: 'Pixelify Sans', system-ui, sans-serif;
+  font-family: var(--font-body);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55);
   transition: border-color 120ms, box-shadow 120ms;
 }
@@ -654,7 +652,7 @@ select {
   display: block;
   margin-bottom: 0.35rem;
   color: var(--ash);
-  font-family: 'Pixelify Sans', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.03em;
