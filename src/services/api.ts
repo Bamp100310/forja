@@ -525,8 +525,34 @@ export const forjaApi = {
     }))
   },
 
-  async saveTransaction(draft: TransactionDraft, existingId?: string): Promise<{ id: string }> {
-    const clientRequestId = `req-${draft.date}-${draft.kind}-${Date.now()}`
+  async saveTransaction(
+    draft: TransactionDraft,
+    existingId?: string,
+    existingClientRequestId?: string
+  ): Promise<{ id: string }> {
+    let clientRequestId = existingClientRequestId || `req-${draft.date}-${draft.kind}-${Date.now()}`
+
+    if (existingId && !existingClientRequestId) {
+      if (!isUsingDemoMode() && supabase) {
+        try {
+          const { data: existingTx } = await supabase
+            .from('transactions')
+            .select('client_request_id')
+            .eq('id', existingId)
+            .maybeSingle()
+          if (existingTx?.client_request_id) {
+            clientRequestId = existingTx.client_request_id
+          }
+        } catch {
+          // Si falla la consulta, continuar con el generado
+        }
+      } else {
+        const existing = inMemoryStore.transactions.find((t) => t.id === existingId)
+        if (existing?.clientRequestId) {
+          clientRequestId = existing.clientRequestId
+        }
+      }
+    }
 
     if (isUsingDemoMode() || !supabase) {
       const id = existingId || `tx-${Date.now()}`
@@ -596,13 +622,66 @@ export const forjaApi = {
         }
       : null
 
-    const { data, error } = await supabase.rpc('save_transaction_atomic', {
-      p_tx: txPayload,
-      p_postings: postingsPayload,
-      p_new_loan: newLoanPayload,
-    })
-    if (error) throw error
-    return { id: (data as { id: string }).id }
+    try {
+      const { data, error } = await supabase.rpc('save_transaction_atomic', {
+        p_tx: txPayload,
+        p_postings: postingsPayload,
+        p_new_loan: newLoanPayload,
+      })
+      if (error) throw error
+      return { id: (data as { id: string }).id }
+    } catch (rpcErr: unknown) {
+      const errMsg = (rpcErr as Error).message || ''
+      if (existingId && errMsg.includes('duplicate key value violates unique constraint "transactions_pkey"')) {
+        // Fallback resiliente: La función SQL remota en Supabase aún no ha sido actualizada con la migración 20261013000000.
+        // Ejecutamos la actualización directa garantizando persistencia inmediata sin error para el usuario.
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) throw rpcErr
+
+        // 1. Actualizar la cabecera del movimiento existente
+        const { error: updateErr } = await supabase
+          .from('transactions')
+          .update({
+            date: draft.date,
+            kind: draft.kind,
+            description: draft.description,
+            notes: draft.notes || null,
+            tags: draft.tags || [],
+            is_moto: Boolean(draft.isMoto),
+            debt_id: draft.debtId || null,
+            loan_id: draft.loanId || null,
+            meta: draft.meta || {},
+          })
+          .eq('id', existingId)
+          .eq('user_id', user.id)
+
+        if (updateErr) throw updateErr
+
+        // 2. Reemplazar líneas contables de forma balanceada
+        const { error: delErr } = await supabase
+          .from('postings')
+          .delete()
+          .eq('transaction_id', existingId)
+          .eq('user_id', user.id)
+
+        if (delErr) throw delErr
+
+        const dbPostings = draft.postings.map((p) => ({
+          user_id: user.id,
+          transaction_id: existingId,
+          target_type: p.targetType,
+          target_id: p.targetId || null,
+          amount: p.amount,
+          role: p.role || null,
+        }))
+
+        const { error: insErr } = await supabase.from('postings').insert(dbPostings)
+        if (insErr) throw insErr
+
+        return { id: existingId }
+      }
+      throw rpcErr
+    }
   },
 
   async deleteTransaction(id: string): Promise<void> {

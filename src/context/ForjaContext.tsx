@@ -67,7 +67,7 @@ interface ForjaContextType {
 
   // Acciones / mutaciones CRUD completas
   refreshData: () => Promise<void>
-  saveTransaction: (draft: TransactionDraft, existingId?: string) => Promise<{ id: string }>
+  saveTransaction: (draft: TransactionDraft, existingId?: string, existingClientRequestId?: string) => Promise<{ id: string }>
   deleteTransaction: (id: string) => Promise<void>
   saveAccount: (account: Omit<Account, 'id'> & { id?: string }) => Promise<string>
   deleteAccount: (id: string) => Promise<void>
@@ -303,10 +303,10 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Mutaciones CRUD
   const saveTransaction = useCallback(
-    async (draft: TransactionDraft, existingId?: string) => {
+    async (draft: TransactionDraft, existingId?: string, existingClientRequestId?: string) => {
       try {
         setIsSyncing(true)
-        const res = await forjaApi.saveTransaction(draft, existingId)
+        const res = await forjaApi.saveTransaction(draft, existingId, existingClientRequestId)
         await refreshData()
         return res
       } catch (err) {

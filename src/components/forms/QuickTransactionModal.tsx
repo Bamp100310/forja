@@ -424,7 +424,11 @@ export const QuickTransactionModal: React.FC = () => {
       }
 
       const draft = buildTransactionDraft(op, { categories })
-      await saveTransaction(draft, editingTransaction ? editingTransaction.id : undefined)
+      await saveTransaction(
+        draft,
+        editingTransaction ? editingTransaction.id : undefined,
+        editingTransaction?.clientRequestId
+      )
 
       // Feedback audiovisual confirmado tras persistencia exitosa
       if (kind === 'income' || kind === 'loan_repayment') {
