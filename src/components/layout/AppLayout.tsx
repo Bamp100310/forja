@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   RefreshCw,
@@ -13,47 +13,51 @@ import { useForja } from '../../context/ForjaContext'
 import { PeriodNavigator } from '../common/PeriodNavigator'
 import { QuickTransactionModal } from '../forms/QuickTransactionModal'
 import { TransactionDetailModal } from '../forms/TransactionDetailModal'
+import { OnboardingModal } from '../common/OnboardingModal'
 import { PixelSprite, type PixelSpriteName } from '../common/PixelSprite'
+import { ForjaLogo } from '../common/ForjaLogo'
+import type { ModuleId } from '../../domain/modules'
 import { sound } from '../../services/sound'
 import { triggerButtonSparks } from '../common/PixelSparks'
 
-const NAV_ITEMS: Array<{ to: string; label: string; sprite: PixelSpriteName }> = [
+interface NavItemConfig {
+  to: string
+  label: string
+  sprite: PixelSpriteName
+  moduleId?: ModuleId
+}
+
+const ALL_NAV_ITEMS: NavItemConfig[] = [
   { to: '/', label: 'Control', sprite: 'cog' },
   { to: '/movimientos', label: 'Movimientos', sprite: 'ledger' },
-  { to: '/taller-moto', label: 'Taller Moto', sprite: 'moto' },
   { to: '/cuentas', label: 'Cuentas', sprite: 'vault' },
-  { to: '/deudas', label: 'Deudas', sprite: 'chain' },
-  { to: '/prestamos', label: 'Préstamos', sprite: 'sack' },
-  { to: '/recurrentes', label: 'Gastos Fijos', sprite: 'calendar' },
-  { to: '/presupuestos', label: 'Metas', sprite: 'flag' },
-  { to: '/informes', label: 'Informes', sprite: 'blueprint' },
+  { to: '/nomina', label: 'Quincenas', sprite: 'sack', moduleId: 'payroll' },
+  { to: '/taller-moto', label: 'Taller Moto', sprite: 'moto', moduleId: 'moto' },
+  { to: '/deudas', label: 'Deudas', sprite: 'chain', moduleId: 'debts_loans' },
+  { to: '/prestamos', label: 'Préstamos', sprite: 'sack', moduleId: 'debts_loans' },
+  { to: '/recurrentes', label: 'Gastos Fijos', sprite: 'calendar', moduleId: 'recurring' },
+  { to: '/presupuestos', label: 'Metas', sprite: 'flag', moduleId: 'budgets' },
+  { to: '/informes', label: 'Informes', sprite: 'blueprint', moduleId: 'reports' },
   { to: '/configuracion', label: 'Ajustes', sprite: 'lever' },
 ]
 
 export const AppLayout: React.FC = () => {
   const { user, signOut } = useAuth()
-  const { isDemoMode, isSyncing, refreshData, openQuickModal } = useForja()
+  const { isDemoMode, isSyncing, refreshData, openQuickModal, isModuleActive } = useForja()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const visibleNavItems = useMemo(
+    () => ALL_NAV_ITEMS.filter((item) => !item.moduleId || isModuleActive(item.moduleId)),
+    [isModuleActive]
+  )
 
   return (
     <div className="min-h-screen bg-[#0e1210] text-slate-100 flex flex-col md:flex-row pb-20 md:pb-0 font-sans">
       {/* SIDEBAR DE ESCRITORIO (Panel de consola industrial) */}
       <aside className="hidden md:flex flex-col w-64 bg-[#111714] border-r border-[#263c34] shrink-0 sticky top-0 h-screen overflow-y-auto shadow-2xl z-30">
-        {/* Encabezado e Identidad FORJA con pixel art */}
-        <div className="p-4 border-b border-[#233a33] bg-[#141f1a]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-sm overflow-hidden border-2 border-emerald-500/70 bg-[#09100e] shrink-0 shadow-md flex items-center justify-center p-1">
-              <PixelSprite name="cog" size={28} className="animate-spin-slow" />
-            </div>
-            <div>
-              <h1 className="font-stencil text-xl tracking-wider text-emerald-400 font-black leading-none">
-                FORJA
-              </h1>
-              <p className="text-[10px] text-amber-300 tracking-wide font-stencil mt-0.5 uppercase">
-                Taller de Finanzas
-              </p>
-            </div>
-          </div>
+        {/* Encabezado e Identidad FORJA II con wordmark oficial */}
+        <div className="p-3.5 border-b border-[#233a33] bg-[#141f1a] flex flex-col items-center justify-center">
+          <ForjaLogo variant="compact" />
 
           {/* Placa de telemetría de sincronización */}
           <div className="mt-3 flex items-center justify-between bg-[#0b1210] border border-[#233a33] rounded-sm px-2.5 py-1.5 text-[11px]">
@@ -103,7 +107,7 @@ export const AppLayout: React.FC = () => {
 
         {/* Enlaces de Navegación con luces piloto y sonidos mecánicos */}
         <nav className="flex-1 px-3 py-2 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             return (
               <NavLink
                 key={item.to}
@@ -153,31 +157,14 @@ export const AppLayout: React.FC = () => {
             </button>
           </div>
           <div className="text-[9px] text-slate-500 font-stencil tracking-wider text-center">
-            FORJA v2.0 • TALLER OPERATIVO
+            FORJA II • SISTEMA MODULAR
           </div>
         </div>
       </aside>
 
-      {/* CABECERA MÓVIL (HUD compacto) */}
-      <header className="md:hidden sticky top-0 z-40 bg-[#111714]/95 backdrop-blur-md border-b-2 border-[#233a33] px-4 py-2.5 flex items-center justify-between shadow-lg">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-sm overflow-hidden border border-emerald-500/60 bg-[#09100e] shrink-0 flex items-center justify-center p-0.5">
-            <PixelSprite name="cog" size={22} />
-          </div>
-          <div>
-            <span className="font-stencil text-base font-black text-emerald-400 tracking-wider block leading-tight">
-              FORJA
-            </span>
-            <span className="text-[9px] font-stencil text-amber-300 uppercase leading-none">
-              Taller de Finanzas
-            </span>
-          </div>
-          {isDemoMode && (
-            <span className="badge-pixel text-[8px] bg-[#2a1d0b] text-amber-300 border-[#6e4612] px-1 py-0 ml-1">
-              DEMO
-            </span>
-          )}
-        </div>
+      {/* CABECERA MÓVIL (HUD compacto con nuevo logo FORJA II) */}
+      <header className="md:hidden sticky top-0 z-40 bg-[#111714]/95 backdrop-blur-md border-b-2 border-[#233a33] px-3.5 py-2 flex items-center justify-between shadow-lg">
+        <ForjaLogo variant="compact" />
 
         <div className="flex items-center gap-1.5">
           <button
@@ -224,7 +211,7 @@ export const AppLayout: React.FC = () => {
             </button>
           </div>
           <nav className="space-y-1">
-            {NAV_ITEMS.map((item) => (
+            {visibleNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -276,17 +263,19 @@ export const AppLayout: React.FC = () => {
               <PixelSprite name="jerrycan" size={15} />
               <span>+ GASTO</span>
             </button>
-            <button
-              onClick={(e) => {
-                sound.playClick()
-                triggerButtonSparks(e, 'amber', 14)
-                openQuickModal('debt_payment')
-              }}
-              className="btn-game btn-game-secondary btn-forge-heat text-xs py-1.5 px-3 text-amber-400 hover:text-amber-300 cursor-pointer font-pixel font-bold flex items-center gap-1.5"
-            >
-              <PixelSprite name="chain" size={15} />
-              <span>PAGO DEUDA</span>
-            </button>
+            {isModuleActive('debts_loans') && (
+              <button
+                onClick={(e) => {
+                  sound.playClick()
+                  triggerButtonSparks(e, 'amber', 14)
+                  openQuickModal('debt_payment')
+                }}
+                className="btn-game btn-game-secondary btn-forge-heat text-xs py-1.5 px-3 text-amber-400 hover:text-amber-300 cursor-pointer font-pixel font-bold flex items-center gap-1.5"
+              >
+                <PixelSprite name="chain" size={15} />
+                <span>PAGO DEUDA</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -296,7 +285,7 @@ export const AppLayout: React.FC = () => {
         </div>
       </main>
 
-      {/* BARRA DE NAVEGACIÓN INFERIOR (MÓVIL HUD) */}
+      {/* BARRA DE NAVEGACIÓN INFERIOR (MÓVIL HUD ADAPTABLE) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#111714]/98 backdrop-blur-md border-t-2 border-[#233a33] z-40 px-2 py-1.5 flex items-center justify-around shadow-2xl">
         <NavLink
           to="/"
@@ -320,27 +309,53 @@ export const AppLayout: React.FC = () => {
           <PixelSprite name="ledger" size={18} />
           <span className="font-stencil mt-0.5">Libro</span>
         </NavLink>
+        {isModuleActive('payroll') ? (
+          <NavLink
+            to="/nomina"
+            className={({ isActive }) =>
+              `flex flex-col items-center py-1 px-2 text-[10px] ${
+                isActive ? 'text-emerald-400 font-bold' : 'text-slate-400'
+              }`
+            }
+          >
+            <PixelSprite name="sack" size={18} />
+            <span className="font-stencil mt-0.5">Quincena</span>
+          </NavLink>
+        ) : isModuleActive('moto') ? (
+          <NavLink
+            to="/taller-moto"
+            className={({ isActive }) =>
+              `flex flex-col items-center py-1 px-2 text-[10px] ${
+                isActive ? 'text-emerald-400 font-bold' : 'text-slate-400'
+              }`
+            }
+          >
+            <PixelSprite name="moto" size={18} />
+            <span className="font-stencil mt-0.5">Moto</span>
+          </NavLink>
+        ) : (
+          <NavLink
+            to="/cuentas"
+            className={({ isActive }) =>
+              `flex flex-col items-center py-1 px-2 text-[10px] ${
+                isActive ? 'text-emerald-400 font-bold' : 'text-slate-400'
+              }`
+            }
+          >
+            <PixelSprite name="vault" size={18} />
+            <span className="font-stencil mt-0.5">Cuentas</span>
+          </NavLink>
+        )}
         <NavLink
-          to="/taller-moto"
+          to={isModuleActive('debts_loans') ? '/deudas' : '/cuentas'}
           className={({ isActive }) =>
             `flex flex-col items-center py-1 px-2 text-[10px] ${
               isActive ? 'text-emerald-400 font-bold' : 'text-slate-400'
             }`
           }
         >
-          <PixelSprite name="moto" size={18} />
-          <span className="font-stencil mt-0.5">Moto</span>
-        </NavLink>
-        <NavLink
-          to="/deudas"
-          className={({ isActive }) =>
-            `flex flex-col items-center py-1 px-2 text-[10px] ${
-              isActive ? 'text-emerald-400 font-bold' : 'text-slate-400'
-            }`
-          }
-        >
-          <PixelSprite name="chain" size={18} />
-          <span className="font-stencil mt-0.5">Deudas</span>
+          <PixelSprite name={isModuleActive('debts_loans') ? 'chain' : 'vault'} size={18} />
+          <span className="font-stencil mt-0.5">{isModuleActive('debts_loans') ? 'Deudas' : 'Cuentas'}</span>
         </NavLink>
         <NavLink
           to="/configuracion"
@@ -355,9 +370,10 @@ export const AppLayout: React.FC = () => {
         </NavLink>
       </div>
 
-      {/* MODAL GLOBAL DE MOVIMIENTO */}
+      {/* MODAL GLOBAL DE MOVIMIENTO & ONBOARDING V2 */}
       <QuickTransactionModal />
       <TransactionDetailModal />
+      <OnboardingModal />
     </div>
   )
 }

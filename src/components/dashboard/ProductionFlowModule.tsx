@@ -5,7 +5,11 @@ import { PixelSprite } from '../common/PixelSprite'
 import { ChevronRight } from 'lucide-react'
 
 export const ProductionFlowModule: React.FC = () => {
-  const { summary } = useForja()
+  const { summary, period, isModuleActive, preferences } = useForja()
+
+  const hasMoto = isModuleActive('moto')
+  const hasPlatforms = isModuleActive('platforms')
+  const hasPayroll = isModuleActive('payroll')
 
   // Proporción de costes sobre ingresos
   const expenseRatio = summary.income > 0 ? Math.min(100, Math.round((summary.expense / summary.income) * 100)) : 0
@@ -21,10 +25,10 @@ export const ProductionFlowModule: React.FC = () => {
           </div>
           <div>
             <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
-              LÍNEA DE PRODUCCIÓN FINANCIERA DEL TALLER
+              {hasMoto ? 'LÍNEA DE PRODUCCIÓN FINANCIERA DEL TALLER' : 'FLUJO DE RECURSOS FINANCIEROS'}
             </h3>
             <p className="text-[11px] text-slate-400 font-pixel">
-              Esquema de transformación de recursos: Entradas brutas → Costos operativos → Resultado neto forjado
+              Esquema de transformación de recursos: Entradas brutas → Costos y consumo → Resultado neto forjado
             </p>
           </div>
         </div>
@@ -38,7 +42,7 @@ export const ProductionFlowModule: React.FC = () => {
 
       {/* Diagrama de flujo tipo Satisfactory con conectores */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 relative items-stretch">
-        {/* ETAPA 1: FUENTES / PLATAFORMAS */}
+        {/* ETAPA 1: FUENTES / PLATAFORMAS / NÓMINA */}
         <div className="bg-[#101917] border border-[#233a33] p-3.5 flex flex-col justify-between relative shadow-sm">
           <div>
             <div className="flex items-center justify-between text-[11px] mb-2 font-stencil">
@@ -46,20 +50,35 @@ export const ProductionFlowModule: React.FC = () => {
               <span className="led-pilot led-pilot-cyan" />
             </div>
             <div className="flex items-center gap-2.5 mb-2">
-              <PixelSprite name="parcel" size={24} />
+              <PixelSprite
+                name={hasPlatforms ? 'parcel' : hasPayroll ? 'sack' : 'vault'}
+                size={24}
+              />
               <span className="font-pixel font-bold text-slate-200 text-xs sm:text-sm">
-                Plataformas & Envíos
+                {hasPlatforms
+                  ? 'Plataformas & Envíos'
+                  : hasPayroll
+                  ? 'Nómina & Quincenas'
+                  : 'Fuentes de Ingreso'}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-snug font-pixel">
-              Rappi, DiDi, Clicoh y viajes particulares en {summary.incomeDays} días activos.
+            <p className="text-xs text-slate-400 leading-snug">
+              {hasPlatforms
+                ? `Rappi, DiDi, Clicoh y viajes particulares en ${summary.incomeDays} días activos.`
+                : hasPayroll
+                ? `Sueldos habituales (${preferences.incomeSchedules?.length || 0} programados) y pagos recibidos.`
+                : `Entradas de dinero y transferencias recibidas en ${summary.incomeDays} días.`}
             </p>
           </div>
 
           <div className="mt-3 pt-2.5 border-t border-[#1c2e28] flex items-baseline justify-between text-xs font-pixel">
-            <span className="text-[10px] text-slate-400">Aporte Moto:</span>
+            <span className="text-[10px] text-slate-400">
+              {hasMoto ? 'Aporte Moto:' : hasPayroll ? 'Sueldos:' : 'Registros:'}
+            </span>
             <span className="text-emerald-400 font-bold">
-              {formatCOPCompact(summary.moto.income)}
+              {hasMoto
+                ? formatCOPCompact(summary.moto.income)
+                : formatCOPCompact(summary.income)}
             </span>
           </div>
         </div>
@@ -77,12 +96,12 @@ export const ProductionFlowModule: React.FC = () => {
             </div>
             <div className="flex items-center gap-2.5 mb-2">
               <PixelSprite name="coins" size={24} />
-              <span className="font-pixel text-lg sm:text-xl font-black text-emerald-300">
+              <span className="num font-pixel text-lg sm:text-xl font-black text-emerald-300">
                 {formatCOP(summary.income)}
               </span>
             </div>
-            <p className="text-[11px] text-slate-300 font-pixel">
-              Total devengado contablemente en el corte del 11 al 10.
+            <p className="text-xs text-slate-300 leading-snug">
+              Total devengado contablemente en el periodo ({period.label}).
             </p>
           </div>
 
@@ -105,12 +124,14 @@ export const ProductionFlowModule: React.FC = () => {
             </div>
             <div className="flex items-center gap-2.5 mb-2">
               <PixelSprite name="jerrycan" size={24} />
-              <span className="font-pixel text-lg sm:text-xl font-black text-rose-300">
+              <span className="num font-pixel text-lg sm:text-xl font-black text-rose-300">
                 − {formatCOP(summary.expense)}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-pixel">
-              Combustible, repuestos, comisiones bancarias y consumo personal.
+            <p className="text-xs text-slate-400 leading-snug">
+              {hasMoto
+                ? 'Combustible, repuestos, comisiones bancarias y consumo personal.'
+                : 'Alimentación, mercado, vivienda, servicios y gastos personales.'}
             </p>
           </div>
 
@@ -146,14 +167,14 @@ export const ProductionFlowModule: React.FC = () => {
             <div className="flex items-center gap-2.5 mb-2">
               <PixelSprite name="cog" size={24} />
               <span
-                className={`font-pixel text-xl sm:text-2xl font-black ${
+                className={`num font-pixel text-xl sm:text-2xl font-black ${
                   summary.result >= 0 ? 'text-emerald-300' : 'text-rose-300'
                 }`}
               >
                 {formatCOP(summary.result)}
               </span>
             </div>
-            <p className="text-[11px] text-slate-300 font-pixel">
+            <p className="text-xs text-slate-300 leading-snug">
               {summary.result >= 0
                 ? 'Superávit limpio forjado en el ciclo actual.'
                 : 'Déficit operativo: los gastos superaron los ingresos devengados.'}

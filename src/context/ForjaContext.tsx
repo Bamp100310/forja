@@ -26,7 +26,15 @@ import type {
   RecurringOccurrence,
   Transaction,
   TransactionKind,
+  UserPreferences,
+  IncomeSchedule,
 } from '../domain/types'
+import {
+  type ModuleId,
+  isModuleEnabled,
+  canDisableModule,
+} from '../domain/modules'
+import { DEFAULT_USER_PREFERENCES } from '../services/api'
 import type { TransactionDraft } from '../domain/ledger/operations'
 
 export interface QuickModalPrefill {
@@ -116,6 +124,15 @@ export interface ForjaContextType {
   detailModalTx: Transaction | null
   openTransactionDetail: (tx: Transaction) => void
   closeTransactionDetail: () => void
+
+  // FORJA V2: Módulos opcionales, ciclos y nómina
+  preferences: import('../domain/types').UserPreferences
+  isModuleActive: (moduleId: import('../domain/modules').ModuleId) => boolean
+  toggleModule: (moduleId: import('../domain/modules').ModuleId, enabled: boolean) => Promise<{ success: boolean; reason?: string }>
+  updatePreferences: (updates: Partial<import('../domain/types').UserPreferences>) => Promise<void>
+  addIncomeSchedule: (sched: Omit<import('../domain/types').IncomeSchedule, 'id'>) => Promise<import('../domain/types').IncomeSchedule>
+  updateIncomeSchedule: (id: string, updates: Partial<import('../domain/types').IncomeSchedule>) => Promise<void>
+  deleteIncomeSchedule: (id: string) => Promise<void>
 }
 
 const ForjaContext = createContext<ForjaContextType | null>(null)
@@ -130,6 +147,7 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isDemoMode, setIsDemoMode] = useState<boolean>(() => forjaApi.isDemo())
 
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_USER_PREFERENCES)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [debts, setDebts] = useState<Debt[]>([])
@@ -183,6 +201,7 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setError(null)
       const [
         p,
+        prefs,
         accs,
         cats,
         dbs,
@@ -196,6 +215,7 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         gls,
       ] = await Promise.all([
         forjaApi.getProfile(),
+        forjaApi.getUserPreferences(),
         forjaApi.getAccounts(),
         forjaApi.getCategories(),
         forjaApi.getDebts(),
@@ -210,6 +230,7 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ])
 
       setProfile(p)
+      setPreferences(prefs)
       setAccounts(accs)
       setCategories(cats)
       setDebts(dbs)
@@ -287,28 +308,34 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setPeriodId = useCallback((id: string) => {
     try {
-      const current = getCurrentPeriod()
+      const current = getCurrentPeriod(new Date(), preferences.cycleConfig)
       if (id > current.id) {
         setPeriod(current)
         return
       }
-      setPeriod(getPeriodById(id))
+      setPeriod(getPeriodById(id, preferences.cycleConfig))
     } catch {
       // Ignorar ID inválido
     }
-  }, [])
+  }, [preferences.cycleConfig])
 
   const goToNextPeriod = useCallback(() => {
     setPeriod((p) => {
-      const current = getCurrentPeriod()
+      const current = getCurrentPeriod(new Date(), preferences.cycleConfig)
       if (p.id >= current.id) return p
-      const next = getNextPeriod(p)
+      const next = getNextPeriod(p, preferences.cycleConfig)
       if (next.id > current.id) return current
       return next
     })
-  }, [])
-  const goToPreviousPeriod = useCallback(() => setPeriod((p) => getPreviousPeriod(p)), [])
-  const resetToCurrentPeriod = useCallback(() => setPeriod(getCurrentPeriod()), [])
+  }, [preferences.cycleConfig])
+
+  const goToPreviousPeriod = useCallback(() => {
+    setPeriod((p) => getPreviousPeriod(p, preferences.cycleConfig))
+  }, [preferences.cycleConfig])
+
+  const resetToCurrentPeriod = useCallback(() => {
+    setPeriod(getCurrentPeriod(new Date(), preferences.cycleConfig))
+  }, [preferences.cycleConfig])
 
   // Agregados
   const index = useMemo(
@@ -529,6 +556,72 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [refreshData],
   )
 
+  // FORJA V2: Métodos de Módulos, Preferencias y Nómina
+  const isModuleActive = useCallback(
+    (moduleId: ModuleId) => {
+      return isModuleEnabled(preferences.enabledModules, moduleId)
+    },
+    [preferences.enabledModules]
+  )
+
+  const toggleModule = useCallback(
+    async (moduleId: ModuleId, enabled: boolean) => {
+      if (!enabled) {
+        const check = canDisableModule(moduleId, preferences.enabledModules)
+        if (!check.allowed) {
+          return { success: false, reason: check.reason }
+        }
+      }
+      const nextModules = enabled
+        ? Array.from(new Set([...preferences.enabledModules, moduleId]))
+        : preferences.enabledModules.filter((id) => id !== moduleId)
+
+      const updated = await forjaApi.updateUserPreferences({ enabledModules: nextModules })
+      setPreferences(updated)
+      return { success: true }
+    },
+    [preferences.enabledModules]
+  )
+
+  const updatePreferences = useCallback(
+    async (updates: Partial<UserPreferences>) => {
+      const updated = await forjaApi.updateUserPreferences(updates)
+      setPreferences(updated)
+      if (updates.cycleConfig) {
+        setPeriod(getCurrentPeriod(new Date(), updates.cycleConfig))
+      }
+    },
+    []
+  )
+
+  const addIncomeSchedule = useCallback(
+    async (sched: Omit<IncomeSchedule, 'id'>) => {
+      const res = await forjaApi.addIncomeSchedule(sched)
+      const fresh = await forjaApi.getUserPreferences()
+      setPreferences(fresh)
+      return res
+    },
+    []
+  )
+
+  const updateIncomeSchedule = useCallback(
+    async (id: string, updates: Partial<IncomeSchedule>) => {
+      await forjaApi.updateIncomeSchedule(id, updates)
+      const fresh = await forjaApi.getUserPreferences()
+      setPreferences(fresh)
+    },
+    []
+  )
+
+  const deleteIncomeSchedule = useCallback(
+    async (id: string) => {
+      await forjaApi.deleteIncomeSchedule(id)
+      const fresh = await forjaApi.getUserPreferences()
+      setPreferences(fresh)
+    },
+    []
+  )
+
   return (
     <ForjaContext.Provider
       value={{
@@ -539,6 +632,13 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resetToCurrentPeriod,
         today,
         profile,
+        preferences,
+        isModuleActive,
+        toggleModule,
+        updatePreferences,
+        addIncomeSchedule,
+        updateIncomeSchedule,
+        deleteIncomeSchedule,
         accounts,
         categories,
         debts,

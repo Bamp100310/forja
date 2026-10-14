@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "@fontsource/pixelify-sans/400.css";
+@import "@fontsource/pixelify-sans/500.css";
+@import "@fontsource/pixelify-sans/600.css";
+@import "@fontsource/pixelify-sans/700.css";
 @import "@fontsource/dotgothic16/latin.css";
 @import "@fontsource/dotgothic16/latin-ext.css";
 @import "@fontsource/silkscreen";
@@ -10,8 +14,9 @@
    Materiales: carbón (fondo), acero envejecido (paneles), madera de nogal
    (marca y cabeceras), cobre/latón (acciones), verdín (positivo), óxido
    (salidas), petróleo (movimientos neutros). Pergamino para la bitácora.
-   Tipos: DotGothic16 (pixel art auténtico 16-bit legible en números y texto),
-   Silkscreen (etiquetas estarcidas de maquinaria), Jersey 10 (rótulos display).
+   Tipos: Pixelify Sans (voz auténtica del videojuego, títulos y subtextos pixel art),
+   Silkscreen (etiquetas estarcidas de maquinaria), Jersey 10 (rótulos display),
+   DotGothic16 (números tabulares nítidos con 5 y 8 inconfundibles).
    ========================================================================== */
 
 /* --- Remapeo de la paleta de Tailwind ------------------------------------
@@ -19,7 +24,7 @@
    Las redirigimos a los materiales del taller para que TODO el producto
    comparta paleta sin reescribir cada clase. */
 @theme {
-  --font-sans: 'DotGothic16', system-ui, sans-serif;
+  --font-sans: 'Pixelify Sans', system-ui, sans-serif;
   --font-mono: 'DotGothic16', ui-monospace, monospace;
 
   --text-xs: 0.8125rem;
@@ -175,10 +180,10 @@
   --paper-ink: #2b241b;
   --paper-ink-2: #6a5c46;
 
-  --font-display: 'Jersey 10', 'DotGothic16', monospace;
+  --font-display: 'Jersey 10', 'Pixelify Sans', monospace;
   --font-stencil: 'Silkscreen', monospace;
-  --font-body: 'DotGothic16', system-ui, sans-serif;
-  --font-pixel: 'DotGothic16', system-ui, sans-serif;
+  --font-body: 'Pixelify Sans', system-ui, sans-serif;
+  --font-pixel: 'Pixelify Sans', system-ui, sans-serif;
   --font-num: 'DotGothic16', ui-monospace, monospace;
 
   /* Esquinas escalonadas tipo pixel art (3px) */

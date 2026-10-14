@@ -284,3 +284,35 @@ export interface Profile {
   motoName: string | null
   motoInitialOdometer: number | null
 }
+
+export type FinancialCycleType = 'custom_cut' | 'calendar_month' | 'biweekly'
+
+export interface FinancialCycleConfig {
+  type: FinancialCycleType
+  /** Día de corte para custom_cut (ej. 11 para ciclo 11-10) */
+  cutStartDay: number
+  /** Días de quincena si aplica (ej. [1, 15] o [15, 30]) */
+  quincenaDays?: [number, number]
+}
+
+export type IncomeScheduleType = 'biweekly' | 'monthly' | 'custom_days'
+
+export interface IncomeSchedule {
+  id: string
+  name: string
+  expectedAmount: number
+  targetAccountId: string | null
+  incomeCategoryId: string | null
+  scheduleType: IncomeScheduleType
+  payDays: number[]
+  isActive: boolean
+  notes?: string | null
+}
+
+export interface UserPreferences {
+  userId?: string
+  enabledModules: import('./modules').ModuleId[]
+  cycleConfig: FinancialCycleConfig
+  incomeSchedules: IncomeSchedule[]
+  onboardingCompleted: boolean
+}

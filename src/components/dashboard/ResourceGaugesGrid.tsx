@@ -1,6 +1,8 @@
 import React from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useForja } from '../../context/ForjaContext'
 import { formatCOP, formatCOPCompact } from '../../domain/money'
+import { getPaydayProjection, calculateDailyAvailableBudget } from '../../domain/payroll'
 import { PixelSprite, type PixelSpriteName } from '../common/PixelSprite'
 
 interface GaugeCardProps {
@@ -137,10 +139,24 @@ const IndustrialGaugeCard: React.FC<GaugeCardProps> = ({
 }
 
 export const ResourceGaugesGrid: React.FC = () => {
-  const { summary, balances, openQuickModal } = useForja()
+  const navigate = useNavigate()
+  const { summary, balances, openQuickModal, isModuleActive, preferences, accounts } = useForja()
 
   const incomeDayAvg = summary.incomeDays > 0 ? Math.round(summary.income / summary.incomeDays) : 0
   const expenseRatio = summary.income > 0 ? summary.expense / summary.income : 0
+
+  const hasMoto = isModuleActive('moto')
+  const hasPlatforms = isModuleActive('platforms')
+  const hasPayroll = isModuleActive('payroll')
+  const hasDebts = isModuleActive('debts_loans')
+
+  // Proyección de nómina si el módulo está activo
+  const activeSchedules = (preferences.incomeSchedules || []).filter((s) => s.isActive)
+  const primarySchedule = activeSchedules[0] || null
+  const projection = primarySchedule ? getPaydayProjection(primarySchedule) : null
+  const dailyBudget = projection
+    ? calculateDailyAvailableBudget(balances.available, projection.daysRemaining, 0)
+    : null
 
   return (
     <div className="space-y-4">
@@ -149,7 +165,7 @@ export const ResourceGaugesGrid: React.FC = () => {
         <div className="flex items-center gap-2 mb-2.5">
           <PixelSprite name="cog" size={16} />
           <span className="font-stencil text-xs text-emerald-400 font-bold uppercase tracking-wider">
-            I. PRODUCCIÓN Y CONSUMO DEL CORTE ACTIVO (11 → 10)
+            I. PRODUCCIÓN Y CONSUMO DEL CORTE ACTIVO
           </span>
           <div className="h-px bg-[#20362f] flex-1" />
         </div>
@@ -167,7 +183,7 @@ export const ResourceGaugesGrid: React.FC = () => {
               label: 'Promedio activo',
               value: `${formatCOPCompact(incomeDayAvg)}/día`,
             }}
-            tooltip="Ingresos devengados y reconocidos contablemente en el corte del 11 al 10"
+            tooltip="Ingresos devengados y reconocidos contablemente en el periodo"
           />
 
           {/* 2. Gastos */}
@@ -175,7 +191,7 @@ export const ResourceGaugesGrid: React.FC = () => {
             title="Gastos Totales"
             categoryBadge="CONSUMO"
             amount={summary.expense}
-            subtitle="Combustible, repuestos y compras"
+            subtitle={hasMoto ? 'Combustible, repuestos y compras' : 'Alimentación, mercado y compras'}
             sprite="jerrycan"
             tone="rose"
             progressRatio={expenseRatio}
@@ -214,12 +230,14 @@ export const ResourceGaugesGrid: React.FC = () => {
         </div>
       </div>
 
-      {/* SECCIÓN 2: TESORERÍA, PASIVOS Y UNIDAD MOTO (Posición viva) */}
+      {/* SECCIÓN 2: TESORERÍA, PASIVOS Y UNIDAD OPERATIVA (Posición viva) */}
       <div>
         <div className="flex items-center gap-2 mb-2.5">
           <PixelSprite name="strongbox" size={16} />
           <span className="font-stencil text-xs text-amber-400 font-bold uppercase tracking-wider">
-            II. TESORERÍA, OBLIGACIONES Y UNIDAD DE NEGOCIO
+            {hasMoto
+              ? 'II. TESORERÍA, OBLIGACIONES Y UNIDAD DE NEGOCIO'
+              : 'II. TESORERÍA, OBLIGACIONES Y SUELDOS'}
           </span>
           <div className="h-px bg-[#20362f] flex-1" />
         </div>
@@ -230,20 +248,27 @@ export const ResourceGaugesGrid: React.FC = () => {
             title="Dinero Disponible"
             categoryBadge="ACTIVO LÍQUIDO"
             amount={balances.available}
-            subtitle={`+ ${formatCOPCompact(balances.platformReceivable)} por cobrar en apps`}
+            subtitle={
+              hasPlatforms && balances.platformReceivable > 0
+                ? `+ ${formatCOPCompact(balances.platformReceivable)} por cobrar en apps`
+                : 'Suma líquida en cuentas y billeteras'
+            }
             sprite="vault"
             tone="cyan"
             metricDetail={{
-              label: balances.platformReceivable > 0 ? 'Apps (clic p/ cobrar)' : 'Apps retenido',
-              value: formatCOPCompact(balances.platformReceivable),
+              label: hasPlatforms && balances.platformReceivable > 0 ? 'Apps (clic p/ cobrar)' : 'Liquidez caja',
+              value:
+                hasPlatforms && balances.platformReceivable > 0
+                  ? formatCOPCompact(balances.platformReceivable)
+                  : formatCOPCompact(balances.available),
             }}
             tooltip={
-              balances.platformReceivable > 0
+              hasPlatforms && balances.platformReceivable > 0
                 ? 'Suma líquida. Haz clic aquí para cobrar pedidos en efectivo o liquidar saldos de Rappi/apps.'
                 : 'Suma disponible en cuentas de ahorro, billeteras (Nequi, Daviplata) y efectivo'
             }
             onClick={
-              balances.platformReceivable > 0
+              hasPlatforms && balances.platformReceivable > 0
                 ? () =>
                     openQuickModal('loan_repayment', null, {
                       collectionSource: 'platform',
@@ -255,23 +280,23 @@ export const ResourceGaugesGrid: React.FC = () => {
           {/* 6. Deudas pendientes */}
           <IndustrialGaugeCard
             title="Deudas Totales"
-            categoryBadge="PASIVO"
+            categoryBadge={hasDebts ? 'PASIVO' : 'SIN DEUDAS'}
             amount={balances.totalDebt}
             subtitle="Tarjetas de crédito y préstamos bancarios"
             sprite="chain"
             tone="amber"
             metricDetail={{
               label: 'Obligaciones',
-              value: 'Abonos periódicos',
+              value: hasDebts ? 'Abonos periódicos' : 'Módulo inactivo',
             }}
             tooltip="Monto total adeudado. Haz clic para registrar un abono a capital o cuota."
-            onClick={() => openQuickModal('debt_payment')}
+            onClick={hasDebts ? () => openQuickModal('debt_payment') : undefined}
           />
 
           {/* 7. Cuentas por cobrar a terceros */}
           <IndustrialGaugeCard
             title="Cuentas por Cobrar"
-            categoryBadge="PRÉSTAMOS"
+            categoryBadge={hasDebts ? 'PRÉSTAMOS' : 'CARTERA'}
             amount={balances.loansPending}
             subtitle="Dinero prestado pendiente de devolución"
             sprite="sack"
@@ -281,27 +306,66 @@ export const ResourceGaugesGrid: React.FC = () => {
               value: formatCOPCompact(balances.loansPending),
             }}
             tooltip="Capital prestado a amigos o familiares pendiente de recuperación. Haz clic para registrar una devolución."
-            onClick={() =>
-              openQuickModal('loan_repayment', null, {
-                collectionSource: 'loan',
-              })
+            onClick={
+              hasDebts
+                ? () =>
+                    openQuickModal('loan_repayment', null, {
+                      collectionSource: 'loan',
+                    })
+                : undefined
             }
           />
 
-          {/* 8. Rendimiento de la moto */}
-          <IndustrialGaugeCard
-            title="Rendimiento Moto"
-            categoryBadge="TALLER"
-            amount={summary.moto.net}
-            subtitle={`Bruto: ${formatCOPCompact(summary.moto.income)} | Costo: ${formatCOPCompact(summary.moto.expense)}`}
-            sprite="moto"
-            tone="mint"
-            metricDetail={{
-              label: 'Margen moto',
-              value: summary.moto.income > 0 ? `${Math.round((summary.moto.net / summary.moto.income) * 100)}%` : '0%',
-            }}
-            tooltip="Ingresos de reparto menos gasolina, repuestos y comisiones de plataforma"
-          />
+          {/* 8. Rendimiento Moto (si moto activa) O Próxima Quincena (si nómina activa) O Cuentas activas */}
+          {hasMoto ? (
+            <IndustrialGaugeCard
+              title="Rendimiento Moto"
+              categoryBadge="TALLER"
+              amount={summary.moto.net}
+              subtitle={`Bruto: ${formatCOPCompact(summary.moto.income)} | Costo: ${formatCOPCompact(summary.moto.expense)}`}
+              sprite="moto"
+              tone="mint"
+              metricDetail={{
+                label: 'Margen moto',
+                value: summary.moto.income > 0 ? `${Math.round((summary.moto.net / summary.moto.income) * 100)}%` : '0%',
+              }}
+              tooltip="Ingresos de reparto menos gasolina, repuestos y comisiones de plataforma"
+            />
+          ) : hasPayroll ? (
+            <IndustrialGaugeCard
+              title="Próximo Cobro Nómina"
+              categoryBadge={projection?.isDueToday ? '¡COBRAS HOY!' : 'QUINCENA'}
+              amount={projection?.expectedAmount || 0}
+              subtitle={
+                projection
+                  ? `${projection.daysRemaining} días restantes (${projection.nextPaydayDate})`
+                  : 'Sin salario programado'
+              }
+              sprite="sack"
+              tone="mint"
+              metricDetail={{
+                label: 'Disponible/día',
+                value: dailyBudget ? `${formatCOPCompact(dailyBudget.dailyBudget)}/d` : 'N/A',
+              }}
+              tooltip="Días restantes hasta tu próximo salario y presupuesto diario recomendado. Haz clic para ver el módulo de quincenas."
+              onClick={() => navigate('/nomina')}
+            />
+          ) : (
+            <IndustrialGaugeCard
+              title="Bóvedas & Cuentas"
+              categoryBadge="DEPÓSITOS"
+              amount={balances.available}
+              subtitle={`${accounts.length} cuentas registradas en tu taller`}
+              sprite="vault"
+              tone="mint"
+              metricDetail={{
+                label: 'Cuentas activas',
+                value: `${accounts.length}`,
+              }}
+              tooltip="Haz clic para ver el estado de todas tus cuentas bancarias y efectivo."
+              onClick={() => navigate('/cuentas')}
+            />
+          )}
         </div>
       </div>
     </div>

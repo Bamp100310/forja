@@ -452,6 +452,132 @@ class SoundSystem {
       // Audio seguro
     }
   }
+
+  /**
+   * Martillazo de forja / yunque incandescente (Easter egg FORJA II):
+   * Golpe potente de martillo de herrero sobre acero templado con resonancia
+   * metálica ("CLANGGG!") y chisporroteo, modulado por el nivel de calor (0 a 5).
+   */
+  playAnvilHit(heatLevel = 0) {
+    if (this.muted || this.volume <= 0 || this.shouldThrottle('anvil_hit', 40)) return
+    try {
+      const ctx = getAudioContext()
+      if (!ctx) return
+      const now = ctx.currentTime
+
+      const master = ctx.createGain()
+      master.gain.setValueAtTime(this.volume * Math.min(0.65, 0.48 + heatLevel * 0.04), now)
+      master.connect(ctx.destination)
+
+      // 1. Golpe sordo de maza pesada de herrero
+      const baseFreq = 90 + heatLevel * 8
+      const thud = ctx.createOscillator()
+      const thudG = ctx.createGain()
+      thud.type = 'triangle'
+      thud.frequency.setValueAtTime(baseFreq, now)
+      thudG.gain.setValueAtTime(0.75, now)
+      thudG.gain.exponentialRampToValueAtTime(0.001, now + 0.08)
+      thud.connect(thudG)
+      thudG.connect(master)
+      thud.start(now)
+      thud.stop(now + 0.085)
+
+      // 2. Ruido blanco de impacto y chispas
+      const noise = ctx.createBufferSource()
+      noise.buffer = getNoiseBuffer(ctx)
+      const noiseFilter = ctx.createBiquadFilter()
+      noiseFilter.type = 'bandpass'
+      noiseFilter.frequency.setValueAtTime(1400 + heatLevel * 150, now)
+      noiseFilter.Q.setValueAtTime(2.5, now)
+      const noiseG = ctx.createGain()
+      noiseG.gain.setValueAtTime(0.6, now)
+      noiseG.gain.exponentialRampToValueAtTime(0.001, now + 0.035)
+      noise.connect(noiseFilter)
+      noiseFilter.connect(noiseG)
+      noiseG.connect(master)
+      noise.start(now)
+      noise.stop(now + 0.04)
+
+      // 3. Cantar brillante del yunque de acero (frecuencias resonantes de forja)
+      const pitchMult = 1 + heatLevel * 0.05
+      const modes = [
+        { freq: 580 * pitchMult, gain: 0.55, decay: 0.12 },
+        { freq: 1180 * pitchMult, gain: 0.5, decay: 0.18 },
+        { freq: 2360 * pitchMult, gain: 0.35, decay: 0.1 },
+        { freq: 4720 * pitchMult, gain: 0.2, decay: 0.06 },
+      ]
+
+      modes.forEach((m) => {
+        const osc = ctx.createOscillator()
+        const g = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(m.freq, now)
+        g.gain.setValueAtTime(m.gain, now)
+        g.gain.exponentialRampToValueAtTime(0.001, now + m.decay)
+        osc.connect(g)
+        g.connect(master)
+        osc.start(now)
+        osc.stop(now + m.decay + 0.01)
+      })
+
+      // 4. Si está incandescente (heat >= 3), siseo térmico de metal ardiente
+      if (heatLevel >= 3) {
+        const hiss = ctx.createBufferSource()
+        hiss.buffer = getNoiseBuffer(ctx)
+        const hissFilter = ctx.createBiquadFilter()
+        hissFilter.type = 'highpass'
+        hissFilter.frequency.setValueAtTime(3500, now)
+        const hissG = ctx.createGain()
+        hissG.gain.setValueAtTime(0.25 * (heatLevel / 5), now)
+        hissG.gain.exponentialRampToValueAtTime(0.001, now + 0.15)
+        hiss.connect(hissFilter)
+        hissFilter.connect(hissG)
+        hissG.connect(master)
+        hiss.start(now + 0.01)
+        hiss.stop(now + 0.16)
+      }
+    } catch {
+      // Audio seguro
+    }
+  }
+
+  /**
+   * Templado / siseo de enfriamiento en agua (quench steam):
+   * Sonido envolvente de vapor siseando al enfriarse el metal al rojo blanco ("PSSSHHHHH").
+   */
+  playQuenchSteam() {
+    if (this.muted || this.volume <= 0 || this.shouldThrottle('quench_steam', 100)) return
+    try {
+      const ctx = getAudioContext()
+      if (!ctx) return
+      const now = ctx.currentTime
+
+      const master = ctx.createGain()
+      master.gain.setValueAtTime(this.volume * 0.55, now)
+      master.connect(ctx.destination)
+
+      const noise = ctx.createBufferSource()
+      noise.buffer = getNoiseBuffer(ctx)
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.setValueAtTime(3200, now)
+      filter.frequency.exponentialRampToValueAtTime(1200, now + 0.6)
+      filter.Q.setValueAtTime(1.5, now)
+
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.65, now)
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.65)
+
+      noise.connect(filter)
+      filter.connect(g)
+      g.connect(master)
+
+      noise.start(now)
+      noise.stop(now + 0.7)
+    } catch {
+      // Audio seguro
+    }
+  }
 }
 
 export const sound = new SoundSystem()

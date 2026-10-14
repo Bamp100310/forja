@@ -4,12 +4,14 @@ import { ForjaProvider } from './context/ForjaContext'
 import { AppLayout } from './components/layout/AppLayout'
 import { PixelSparks } from './components/common/PixelSparks'
 import { PixelSprite } from './components/common/PixelSprite'
+import { ModuleGuard } from './components/common/ModuleGuard'
 import { LoginPage } from './pages/LoginPage'
 import { ConfigErrorPage } from './pages/ConfigErrorPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { MotoPage } from './pages/MotoPage'
 import { AccountsPage } from './pages/AccountsPage'
+import { PayrollPage } from './pages/PayrollPage'
 import { DebtsPage } from './pages/DebtsPage'
 import { LoansPage } from './pages/LoansPage'
 import { RecurringPage } from './pages/RecurringPage'
@@ -50,13 +52,63 @@ function AuthenticatedApp() {
           <Route path="/" element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="movimientos" element={<TransactionsPage />} />
-            <Route path="taller-moto" element={<MotoPage />} />
             <Route path="cuentas" element={<AccountsPage />} />
-            <Route path="deudas" element={<DebtsPage />} />
-            <Route path="prestamos" element={<LoansPage />} />
-            <Route path="recurrentes" element={<RecurringPage />} />
-            <Route path="presupuestos" element={<PlanningPage />} />
-            <Route path="informes" element={<ReportsPage />} />
+            <Route
+              path="nomina"
+              element={
+                <ModuleGuard moduleId="payroll">
+                  <PayrollPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="taller-moto"
+              element={
+                <ModuleGuard moduleId="moto">
+                  <MotoPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="deudas"
+              element={
+                <ModuleGuard moduleId="debts_loans">
+                  <DebtsPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="prestamos"
+              element={
+                <ModuleGuard moduleId="debts_loans">
+                  <LoansPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="recurrentes"
+              element={
+                <ModuleGuard moduleId="recurring">
+                  <RecurringPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="presupuestos"
+              element={
+                <ModuleGuard moduleId="budgets">
+                  <PlanningPage />
+                </ModuleGuard>
+              }
+            />
+            <Route
+              path="informes"
+              element={
+                <ModuleGuard moduleId="reports">
+                  <ReportsPage />
+                </ModuleGuard>
+              }
+            />
             <Route path="configuracion" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

@@ -8,9 +8,11 @@ import { triggerButtonSparks } from '../common/PixelSparks'
 import workshopHeroWebp from '../../assets/forja/workshop_hero.webp'
 
 export const WorkshopHero: React.FC = () => {
-  const { profile, period, summary, isDemoMode, today, openQuickModal } = useForja()
+  const { profile, period, summary, isDemoMode, today, openQuickModal, isModuleActive } = useForja()
 
-  // Días transcurridos vs total de días del corte (11 al 10)
+  const hasMoto = isModuleActive('moto')
+
+  // Días transcurridos vs total de días del corte
   const totalDays = Math.max(1, daysBetween(period.start, period.end) + 1)
   const elapsedDays = Math.min(totalDays, Math.max(1, daysBetween(period.start, today) + 1))
   const progressPercent = Math.min(100, Math.round((elapsedDays / totalDays) * 100))
@@ -22,7 +24,7 @@ export const WorkshopHero: React.FC = () => {
         <div className="flex items-center gap-2.5">
           <span className="led-pilot led-pilot-online animate-pulse" />
           <span className="font-stencil text-[11px] text-emerald-400 font-bold tracking-wider">
-            SISTEMA CENTRAL • CORTE {period.id}
+            SISTEMA CENTRAL • {period.id}
           </span>
           {isDemoMode ? (
             <span className="badge-pixel bg-[#2a1d0b] text-amber-300 border-[#6e4612] text-[9px]">
@@ -63,17 +65,34 @@ export const WorkshopHero: React.FC = () => {
             <div className="flex items-center gap-2 mb-1.5">
               <PixelSprite name="cog" size={18} />
               <span className="text-[11px] font-stencil uppercase tracking-widest text-amber-400 font-bold">
-                ESTACIÓN DE OPERACIONES & FORJA FINANCIERA
+                {hasMoto
+                  ? 'ESTACIÓN DE OPERACIONES & FORJA FINANCIERA'
+                  : 'ESTACIÓN FINANCIERA & CONTROL DE PATRIMONIO'}
               </span>
             </div>
 
             <h1 className="font-pixel text-2xl sm:text-3xl lg:text-4xl font-black text-slate-100 tracking-tight leading-tight">
-              {profile?.displayName ? `Taller de ${profile.displayName}` : 'Taller de Operaciones FORJA'}
+              {profile?.displayName
+                ? hasMoto
+                  ? `Taller de ${profile.displayName}`
+                  : `Finanzas de ${profile.displayName}`
+                : hasMoto
+                ? 'Taller de Operaciones FORJA'
+                : 'Consola Financiera FORJA'}
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 mt-1.5 leading-relaxed max-w-xl">
-              Transformando kilómetros, entregas y esfuerzo en patrimonio sólido. Monitoreo estricto del corte contable del{' '}
-              <span className="text-emerald-400 font-semibold font-mono">11 al 10</span> en Bogotá.
+              {hasMoto ? (
+                <>
+                  Transformando kilómetros, entregas y esfuerzo en patrimonio sólido. Monitoreo del periodo contable{' '}
+                  <span className="text-emerald-400 font-semibold font-mono">{period.label}</span>.
+                </>
+              ) : (
+                <>
+                  Organizando salarios, quincenas y gastos cotidianos en un patrimonio ordenado y predecible.{' '}
+                  <span className="text-emerald-400 font-semibold font-mono">{period.label}</span>.
+                </>
+              )}
             </p>
 
             {/* Cronómetro industrial de corte */}
@@ -102,13 +121,13 @@ export const WorkshopHero: React.FC = () => {
               </div>
               <div>
                 <span className="text-[10px] font-stencil uppercase tracking-wider text-slate-400 block">
-                  PRODUCCIÓN DEVENGADA DEL CORTE
+                  {hasMoto ? 'PRODUCCIÓN DEVENGADA DEL CORTE' : 'INGRESOS DEL PERIODO'}
                 </span>
                 <span className="font-pixel text-xl sm:text-2xl font-black text-emerald-300 block leading-tight">
                   {formatCOP(summary.income)}
                 </span>
                 <span className="text-[11px] text-slate-400 block mt-0.5 font-pixel">
-                  {summary.incomeDays} jornadas con cobros registrados
+                  {summary.incomeDays} {summary.incomeDays === 1 ? 'día con cobros' : 'días con cobros'} registrados
                 </span>
               </div>
             </div>

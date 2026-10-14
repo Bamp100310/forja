@@ -41,6 +41,10 @@ async function setupTestDb() {
   const migrationSql2 = readFileSync(migrationPath2, 'utf8')
   await db.exec(migrationSql2)
 
+  const migrationPath3 = resolve(process.cwd(), 'supabase/migrations/20261014000000_forja_v2_modules_and_cycles.sql')
+  const migrationSql3 = readFileSync(migrationPath3, 'utf8')
+  await db.exec(migrationSql3)
+
   // Otorgar permisos al rol autenticado sobre el esquema público
   await db.exec(`
     grant usage on schema public to authenticated;
@@ -377,5 +381,109 @@ describe('Integración PostgreSQL + RLS con PGlite', () => {
     const txRow = await db.query(`select description, date from public.transactions where id = '${origUuid}';`)
     expect(txRow.rows[0].description).toBe('Compra repuesto modificado')
     expect(new Date(txRow.rows[0].date).toISOString().slice(0, 10)).toBe('2026-10-12')
+  })
+
+  it('FORJA V2 — inicializa y aísla preferencias de módulos y ciclos contables por usuario', async () => {
+    const db = await setupTestDb()
+
+    // 1. Usuario 1 (Alejo / Taller) inicializa
+    await asUser(db, USER_1)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    const pref1Res = await db.query(`select * from public.user_preferences where user_id = '${USER_1}';`)
+    expect(pref1Res.rows.length).toBe(1)
+    const pref1 = pref1Res.rows[0]
+    expect(pref1.active_modules).toContain('moto')
+    expect(pref1.active_modules).toContain('platforms')
+    expect((pref1.cycle_config as { startDay?: number }).startDay).toBe(11)
+
+    // 2. Usuario 2 (Pareja / Finanzas Personales) inicializa
+    await asUser(db, USER_2)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    // Usuario 2 no debe ver las preferencias de Usuario 1
+    const prefU2Visible = await db.query(`select * from public.user_preferences;`)
+    expect(prefU2Visible.rows.length).toBe(1)
+    expect(prefU2Visible.rows[0].user_id).toBe(USER_2)
+
+    // 3. Usuario 2 actualiza sus preferencias a finanzas personales (nómina activa, moto desactivada, mes calendario)
+    await db.query(`
+      update public.user_preferences set
+        active_modules = array['payroll', 'debts_loans', 'recurring', 'budgets', 'reports']::text[],
+        cycle_config = '{"type": "calendar_month", "name": "Mes natural"}'::jsonb,
+        onboarding_completed = true
+      where user_id = '${USER_2}';
+    `)
+
+    const updatedU2 = await db.query(`select * from public.user_preferences where user_id = '${USER_2}';`)
+    expect(updatedU2.rows[0].active_modules).toContain('payroll')
+    expect(updatedU2.rows[0].active_modules).not.toContain('moto')
+    expect((updatedU2.rows[0].cycle_config as { type?: string }).type).toBe('calendar_month')
+
+    // 4. Usuario 1 permanece inalterado (su ciclo sigue en corte día 11 y moto activa)
+    await asUser(db, USER_1)
+    const checkU1 = await db.query(`select * from public.user_preferences where user_id = '${USER_1}';`)
+    expect(checkU1.rows[0].active_modules).toContain('moto')
+    expect((checkU1.rows[0].cycle_config as { startDay?: number }).startDay).toBe(11)
+
+    // 5. Usuario 1 no puede modificar preferencias de Usuario 2
+    await db.query(`
+      update public.user_preferences set
+        active_modules = array['hack']::text[]
+      where user_id = '${USER_2}';
+    `)
+
+    await asUser(db, USER_2)
+    const verifyU2Untouched = await db.query(`select * from public.user_preferences where user_id = '${USER_2}';`)
+    expect(verifyU2Untouched.rows[0].active_modules).not.toContain('hack')
+    expect(verifyU2Untouched.rows[0].active_modules).toContain('payroll')
+  })
+
+  it('FORJA V2 — la desactivación de módulos es no destructiva para los movimientos contables', async () => {
+    const db = await setupTestDb()
+
+    await asUser(db, USER_1)
+    await db.exec(`select public.ensure_user_setup();`)
+
+    // Crear cuenta y categoría de moto
+    const accInsert = await db.query(`
+      insert into public.accounts (user_id, name, kind, opening_balance, opening_date)
+      values ('${USER_1}', 'Caja Taller', 'cash', 100000, '2026-09-01')
+      returning id;
+    `)
+    const accId = accInsert.rows[0].id
+    const catRes = await db.query(`select id from public.categories where user_id = '${USER_1}' and is_moto = true limit 1;`)
+    const catId = catRes.rows[0].id
+
+    // Registrar gasto de combustible para la moto
+    const txId = '88888888-8888-4888-a888-888888888888'
+    await db.exec(`
+      insert into public.transactions (id, user_id, date, kind, description, is_moto, client_request_id)
+      values ('${txId}', '${USER_1}', '2026-10-14', 'expense', 'Gasolina Terpel', true, 'req-fuel-1');
+
+      insert into public.postings (user_id, transaction_id, target_type, target_id, amount)
+      values
+        ('${USER_1}', '${txId}', 'category', '${catId}', 20000),
+        ('${USER_1}', '${txId}', 'account', '${accId}', -20000);
+    `)
+
+    // Comprobar total antes de desactivar moto
+    const totBefore = await db.query(`select total from public.ledger_target_totals where target_id = '${accId}';`)
+    expect(Number(totBefore.rows[0].total)).toBe(-20000)
+
+    // Desactivar el módulo de moto en preferencias
+    await db.query(`
+      update public.user_preferences set
+        active_modules = array['payroll', 'debts_loans']::text[]
+      where user_id = '${USER_1}';
+    `)
+
+    // Los datos y asientos contables DEBEN continuar intactos y sumando en el ledger
+    const txCheck = await db.query(`select * from public.transactions where id = '${txId}';`)
+    expect(txCheck.rows.length).toBe(1)
+    expect(txCheck.rows[0].description).toBe('Gasolina Terpel')
+
+    const totAfter = await db.query(`select total from public.ledger_target_totals where target_id = '${accId}';`)
+    expect(Number(totAfter.rows[0].total)).toBe(-20000)
   })
 })

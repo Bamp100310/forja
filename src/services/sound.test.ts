@@ -39,6 +39,8 @@ describe('sound service', () => {
       sound.playIncome()
       sound.playExpense()
       sound.playError()
+      sound.playAnvilHit(2)
+      sound.playQuenchSteam()
     }).not.toThrow()
 
     sound.setMuted(true)
@@ -48,6 +50,8 @@ describe('sound service', () => {
       sound.playIncome()
       sound.playExpense()
       sound.playError()
+      sound.playAnvilHit(4)
+      sound.playQuenchSteam()
     }).not.toThrow()
   })
 })

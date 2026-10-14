@@ -26,13 +26,24 @@ import type {
   RecurringExpense,
   RecurringOccurrence,
   Transaction,
+  UserPreferences,
+  IncomeSchedule,
 } from '../domain/types'
+import { WORKSHOP_PRESET_MODULES } from '../domain/modules'
 import type { TransactionDraft } from '../domain/ledger/operations'
 
 const LOCAL_STORAGE_KEY = 'forja_persistence_v2'
 
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  enabledModules: [...WORKSHOP_PRESET_MODULES],
+  cycleConfig: { type: 'custom_cut', cutStartDay: 11 },
+  incomeSchedules: [],
+  onboardingCompleted: true,
+}
+
 interface StoreState {
   profile: Profile
+  preferences: UserPreferences
   accounts: Account[]
   categories: Category[]
   debts: Debt[]
@@ -49,6 +60,7 @@ interface StoreState {
 // Almacén reactivo local con persistencia en localStorage para desarrollo/offline/demo
 class LocalStore {
   profile: Profile
+  preferences: UserPreferences
   accounts: Account[]
   categories: Category[]
   debts: Debt[]
@@ -64,6 +76,7 @@ class LocalStore {
   constructor() {
     const initial = this.loadFromStorage()
     this.profile = initial.profile
+    this.preferences = initial.preferences
     this.accounts = initial.accounts
     this.categories = initial.categories
     this.debts = initial.debts
@@ -85,6 +98,7 @@ class LocalStore {
           const parsed = JSON.parse(raw) as Partial<StoreState>
           return {
             profile: parsed.profile ?? { ...DEMO_PROFILE },
+            preferences: parsed.preferences ?? { ...DEFAULT_USER_PREFERENCES },
             accounts: parsed.accounts ?? [...DEMO_ACCOUNTS],
             categories: parsed.categories ?? [...DEMO_CATEGORIES],
             debts: parsed.debts ?? [...DEMO_DEBTS],
@@ -104,6 +118,7 @@ class LocalStore {
     }
     return {
       profile: { ...DEMO_PROFILE },
+      preferences: { ...DEFAULT_USER_PREFERENCES },
       accounts: [...DEMO_ACCOUNTS],
       categories: [...DEMO_CATEGORIES],
       debts: [...DEMO_DEBTS],
@@ -121,6 +136,7 @@ class LocalStore {
   reload() {
     const fresh = this.loadFromStorage()
     this.profile = fresh.profile
+    this.preferences = fresh.preferences
     this.accounts = fresh.accounts
     this.categories = fresh.categories
     this.debts = fresh.debts
@@ -139,6 +155,7 @@ class LocalStore {
       try {
         const payload: StoreState = {
           profile: this.profile,
+          preferences: this.preferences,
           accounts: this.accounts,
           categories: this.categories,
           debts: this.debts,
@@ -160,6 +177,7 @@ class LocalStore {
 
   resetToDefaults() {
     this.profile = { ...DEMO_PROFILE }
+    this.preferences = { ...DEFAULT_USER_PREFERENCES }
     this.accounts = [...DEMO_ACCOUNTS]
     this.categories = [...DEMO_CATEGORIES]
     this.debts = [...DEMO_DEBTS]
@@ -1043,5 +1061,79 @@ export const forjaApi = {
     }
     const { error } = await supabase.from('goals').delete().eq('id', id)
     if (error) throw error
+  },
+
+  // --------------------------------------------------------------------------
+  // FORJA V2: Preferencias de Usuario y Gestión de Módulos
+  // --------------------------------------------------------------------------
+  async getUserPreferences(): Promise<UserPreferences> {
+    if (isUsingDemoMode() || !supabase) return inMemoryStore.preferences
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return inMemoryStore.preferences
+    try {
+      const { data, error } = await supabase
+        .from('user_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (error || !data) return inMemoryStore.preferences
+      return {
+        userId: data.user_id,
+        enabledModules: (data.enabled_modules as import('../domain/modules').ModuleId[]) ?? inMemoryStore.preferences.enabledModules,
+        cycleConfig: (data.cycle_config as import('../domain/types').FinancialCycleConfig) ?? inMemoryStore.preferences.cycleConfig,
+        incomeSchedules: (data.income_schedules as import('../domain/types').IncomeSchedule[]) ?? inMemoryStore.preferences.incomeSchedules,
+        onboardingCompleted: data.onboarding_completed ?? inMemoryStore.preferences.onboardingCompleted,
+      }
+    } catch {
+      return inMemoryStore.preferences
+    }
+  },
+
+  async updateUserPreferences(updates: Partial<UserPreferences>): Promise<UserPreferences> {
+    const updated: UserPreferences = {
+      ...inMemoryStore.preferences,
+      ...updates,
+    }
+    inMemoryStore.preferences = updated
+    inMemoryStore.persist()
+
+    if (!isUsingDemoMode() && supabase) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.from('user_preferences').upsert({
+            user_id: user.id,
+            enabled_modules: updated.enabledModules,
+            cycle_config: updated.cycleConfig,
+            income_schedules: updated.incomeSchedules,
+            onboarding_completed: updated.onboardingCompleted,
+            updated_at: new Date().toISOString(),
+          })
+        }
+      } catch (err) {
+        console.warn('No se pudo guardar user_preferences en Supabase (usando fallback local):', err)
+      }
+    }
+    return updated
+  },
+
+  async addIncomeSchedule(schedule: Omit<IncomeSchedule, 'id'>): Promise<IncomeSchedule> {
+    const id = `sched-${Date.now()}`
+    const item: IncomeSchedule = { ...schedule, id }
+    const nextSchedules = [...inMemoryStore.preferences.incomeSchedules, item]
+    await this.updateUserPreferences({ incomeSchedules: nextSchedules })
+    return item
+  },
+
+  async updateIncomeSchedule(id: string, updates: Partial<IncomeSchedule>): Promise<void> {
+    const nextSchedules = inMemoryStore.preferences.incomeSchedules.map((s) =>
+      s.id === id ? { ...s, ...updates } : s
+    )
+    await this.updateUserPreferences({ incomeSchedules: nextSchedules })
+  },
+
+  async deleteIncomeSchedule(id: string): Promise<void> {
+    const nextSchedules = inMemoryStore.preferences.incomeSchedules.filter((s) => s.id !== id)
+    await this.updateUserPreferences({ incomeSchedules: nextSchedules })
   },
 }

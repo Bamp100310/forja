@@ -1,17 +1,29 @@
 import React, { useState } from 'react'
-import { User, Database, Download, Plus, Check, Volume2, VolumeX, Trash2, RefreshCw, LogOut } from 'lucide-react'
+import { User, Database, Download, Plus, Check, Volume2, VolumeX, Trash2, RefreshCw, LogOut, Sliders, Calendar } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useForja } from '../context/ForjaContext'
 import { downloadFile, exportTransactionsToCSV } from '../services/exportImport'
 import { isSupabaseConfigured } from '../services/supabase'
-import type { CategoryKind } from '../domain/types'
-import { PixelSprite } from '../components/common/PixelSprite'
+import type { CategoryKind, FinancialCycleType } from '../domain/types'
+import {
+  MODULE_REGISTRY,
+  PERSONAL_PRESET_MODULES,
+  WORKSHOP_PRESET_MODULES,
+  canDisableModule,
+  type ModuleId,
+} from '../domain/modules'
+import { PixelSprite, type PixelSpriteName } from '../components/common/PixelSprite'
 import { sound } from '../services/sound'
 import { triggerPixelSparks } from '../components/common/PixelSparks'
 
 export const SettingsPage: React.FC = () => {
   const { user, signOut } = useAuth()
   const {
+    preferences,
+    updatePreferences,
+    isModuleActive,
+    toggleModule,
+    period,
     profile,
     updateProfile,
     isDemoMode,
@@ -38,6 +50,15 @@ export const SettingsPage: React.FC = () => {
   const [motoName, setMotoName] = useState(profile?.motoName || '')
   const [motoOdometer, setMotoOdometer] = useState(profile?.motoInitialOdometer || 0)
   const [profileSaved, setProfileSaved] = useState(false)
+
+  // Configuración de ciclo financiero
+  const [cycleType, setCycleType] = useState<FinancialCycleType>(
+    preferences.cycleConfig?.type || 'custom_cut'
+  )
+  const [cutStartDay, setCutStartDay] = useState<number>(
+    preferences.cycleConfig?.cutStartDay || 11
+  )
+  const [cycleSaved, setCycleSaved] = useState(false)
 
   // Audio settings
   const [isMuted, setIsMuted] = useState(() => sound.isMuted())
@@ -162,6 +183,57 @@ export const SettingsPage: React.FC = () => {
     downloadFile(csv, `forja-todos-movimientos.csv`, 'text/csv;charset=utf-8')
   }
 
+  const handleToggleModuleAction = async (modId: ModuleId) => {
+    const active = isModuleActive(modId)
+    if (active) {
+      const check = canDisableModule(modId, preferences.enabledModules)
+      if (!check.allowed) {
+        sound.playError()
+        alert(check.reason)
+        return
+      }
+    }
+    sound.playClick()
+    await toggleModule(modId, !active)
+  }
+
+  const handleApplyPreset = async (preset: 'workshop' | 'personal') => {
+    sound.playConfirm()
+    if (preset === 'workshop') {
+      await updatePreferences({
+        enabledModules: [...WORKSHOP_PRESET_MODULES],
+        cycleConfig: {
+          type: 'custom_cut',
+          cutStartDay: 11,
+        },
+      })
+      setCycleType('custom_cut')
+      setCutStartDay(11)
+    } else {
+      await updatePreferences({
+        enabledModules: [...PERSONAL_PRESET_MODULES],
+        cycleConfig: {
+          type: 'calendar_month',
+          cutStartDay: 1,
+        },
+      })
+      setCycleType('calendar_month')
+    }
+  }
+
+  const handleSaveCycle = async (e: React.FormEvent) => {
+    e.preventDefault()
+    sound.playConfirm()
+    await updatePreferences({
+      cycleConfig: {
+        type: cycleType,
+        cutStartDay: cycleType === 'custom_cut' ? Number(cutStartDay) || 11 : 1,
+      },
+    })
+    setCycleSaved(true)
+    setTimeout(() => setCycleSaved(false), 2500)
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Cabecera del Centro de Ajustes */}
@@ -178,10 +250,199 @@ export const SettingsPage: React.FC = () => {
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ajustes de operario, feedback sonoro, odómetro de la moto, catálogo y respaldo de datos
+              Personalización de módulos V2, ciclos contables, operario, sonido y respaldo
             </p>
           </div>
         </div>
+      </div>
+
+      {/* SECCIÓN V2: PERSONALIZAR MI FORJA — GESTOR DE MÓDULOS */}
+      <div className="forge-machine-panel rivet-corners p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#213731] pb-3">
+          <div className="flex items-center gap-2.5">
+            <Sliders size={18} className="text-emerald-400" />
+            <div>
+              <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
+                PERSONALIZAR MI FORJA — GESTOR DE MÓDULOS
+              </h3>
+              <p className="text-[11px] text-slate-400 font-pixel">
+                Enciende o apaga capacidades según tu actividad. El núcleo financiero siempre permanece activo.
+              </p>
+            </div>
+          </div>
+
+          {/* Preajustes rápidos */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleApplyPreset('personal')}
+              className="btn-game btn-game-secondary text-[11px] py-1 px-2.5 text-emerald-300 font-bold"
+              title="Activar Nómina, Presupuestos, Recurrentes y desactivar Moto/Plataformas"
+            >
+              PREAJUSTE PERSONAL
+            </button>
+            <button
+              onClick={() => handleApplyPreset('workshop')}
+              className="btn-game btn-game-secondary text-[11px] py-1 px-2.5 text-amber-300 font-bold"
+              title="Activar Moto, Plataformas, Taller y corte 11 al 10"
+            >
+              PREAJUSTE TALLER
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(Object.keys(MODULE_REGISTRY) as ModuleId[]).map((modId) => {
+            const mod = MODULE_REGISTRY[modId]
+            const active = isModuleActive(modId)
+            const disableCheck = active ? canDisableModule(modId, preferences.enabledModules) : { allowed: true }
+
+            return (
+              <div
+                key={modId}
+                className={`p-3.5 rounded-sm border transition-all flex flex-col justify-between ${
+                  active
+                    ? 'bg-[#12201a] border-emerald-600/70 shadow-sm'
+                    : 'bg-[#0a0f0d] border-[#1b2b24] opacity-75'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1b2e26]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PixelSprite name={(mod.iconName as PixelSpriteName) || 'cog'} size={18} />
+                      <span className="font-pixel text-xs font-bold text-slate-100 truncate">
+                        {mod.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={active ? 'led-pilot led-pilot-online' : 'led-pilot led-pilot-amber'} />
+                      <span
+                        className={`text-[9px] font-stencil uppercase tracking-wider px-1.5 py-0.5 rounded-xs ${
+                          active
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                            : 'bg-slate-900 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        {active ? 'ACTIVO' : 'INACTIVO'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300 font-pixel leading-snug mb-2">
+                    {mod.description}
+                  </p>
+
+                  <div className="text-[10px] text-slate-400 space-y-0.5 font-mono">
+                    <span className="text-slate-500 block uppercase">Habilita:</span>
+                    <span className="text-emerald-400/90 block truncate">
+                      {mod.tagline}
+                    </span>
+                  </div>
+
+                  {mod.dependencies.length > 0 && (
+                    <div className="mt-2 text-[10px] text-amber-400/90 font-mono">
+                      Requiere: {mod.dependencies.map((d) => MODULE_REGISTRY[d].name).join(', ')}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-[#1a2d24] flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-pixel">
+                    {active ? 'Listo en navegación' : 'Oculto en interfaz'}
+                  </span>
+
+                  <button
+                    onClick={() => handleToggleModuleAction(modId)}
+                    disabled={active && !disableCheck.allowed}
+                    className={`btn-game text-xs py-1 px-3 font-pixel font-bold cursor-pointer ${
+                      active
+                        ? 'btn-game-secondary text-rose-300 hover:text-rose-200'
+                        : 'btn-game-primary text-slate-900'
+                    }`}
+                  >
+                    {active ? 'DESACTIVAR' : 'ACTIVAR'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="p-3 rounded-sm bg-[#0a1210] border border-[#1e342c] text-[11px] text-slate-400 font-pixel">
+          <strong className="text-emerald-300">Garantía de no pérdida:</strong> Desactivar un módulo solo oculta
+          sus paneles y accesos directos. Tus transacciones, kilómetros, registros y balances históricos continúan
+          guardados en Supabase. Si reactivas el módulo, toda tu información reaparece intacta.
+        </div>
+      </div>
+
+      {/* SECCIÓN V2: CICLO FINANCIERO Y FECHAS DE CORTE */}
+      <div className="forge-machine-panel rivet-corners p-5 space-y-4">
+        <div className="flex items-center gap-2.5 border-b border-[#213731] pb-3">
+          <Calendar size={18} className="text-sky-400" />
+          <div>
+            <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
+              CICLO FINANCIERO Y CORTE CONTABLE PERSONALIZADO
+            </h3>
+            <p className="text-[11px] text-slate-400 font-pixel">
+              Define cómo agrupa FORJA tus ingresos, gastos y presupuestos mensuales.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveCycle} className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="field-label">Tipo de ciclo contable</label>
+              <select
+                value={cycleType}
+                onChange={(e) => setCycleType(e.target.value as FinancialCycleType)}
+                className="field"
+              >
+                <option value="custom_cut">Corte personalizado (Empieza un día fijo del mes)</option>
+                <option value="calendar_month">Mes calendario natural (Día 1 al último día)</option>
+              </select>
+            </div>
+
+            {cycleType === 'custom_cut' && (
+              <div>
+                <label className="field-label">Día de inicio del corte mensual (1 al 31)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={cutStartDay}
+                  onChange={(e) => setCutStartDay(Number(e.target.value))}
+                  className="field"
+                  required
+                />
+                <span className="text-[10px] text-slate-400 font-pixel mt-1 block">
+                  Ej. 11 genera cortes del 11 al 10 del mes siguiente (ciclo tradicional de Alejo).
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 bg-[#0a1210] border border-[#1e342c] rounded-sm flex items-center justify-between text-xs">
+            <div>
+              <span className="text-slate-400 font-pixel block text-[11px]">Periodo activo actual:</span>
+              <span className="text-emerald-300 font-stencil text-sm font-bold">{period.label}</span>
+            </div>
+            <span className="badge-pixel bg-[#14261f] text-emerald-400 border-[#234235] text-[10px]">
+              ID: {period.id}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-1 border-t border-[#1a2d26]">
+            {cycleSaved && (
+              <span className="text-emerald-400 text-xs flex items-center gap-1 font-pixel font-bold">
+                <Check size={14} /> CICLO ACTUALIZADO CON ÉXITO
+              </span>
+            )}
+            <button type="submit" className="btn-game btn-game-primary text-xs py-2 px-4 font-pixel font-bold">
+              GUARDAR CONFIGURACIÓN DE CICLO
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* 1. RETROALIMENTACIÓN AUDITIVE Y SENSACIÓN TÁCTIL */}

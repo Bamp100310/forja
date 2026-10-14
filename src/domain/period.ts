@@ -1,9 +1,10 @@
 /**
- * Corte financiero mensual del 11 al 10 (ambos inclusive).
+ * FORJA V2 — Motor de Periodos y Cortes Financieros Parametrizables.
  *
- * Regla de negocio: cada corte comienza el día 11 de un mes y termina el día 10
- * del mes siguiente. El día 10 pertenece al corte que termina y el 11 al que
- * comienza. Esta es la ÚNICA implementación de la regla en toda la aplicación.
+ * Soporta:
+ *  1. Ciclo personalizado con corte día X a X-1 del mes siguiente (ej. 11 a 10 para Alejo).
+ *  2. Ciclo de mes calendario natural (1 al último día de mes para asalariados/pareja).
+ *  3. Ciclos quincenales / biweekly.
  */
 import {
   type ISODate,
@@ -15,18 +16,24 @@ import {
   toISODate,
   todayInBogota,
 } from './dates'
+import type { FinancialCycleConfig } from './types'
 
 export const CUT_START_DAY = 11
 export const CUT_END_DAY = CUT_START_DAY - 1
+
+export const DEFAULT_CYCLE_CONFIG: FinancialCycleConfig = {
+  type: 'custom_cut',
+  cutStartDay: 11,
+}
 
 export interface CutPeriod {
   /** Identificador estable: año y mes en que comienza el corte (`YYYY-MM`). */
   id: string
   start: ISODate
   end: ISODate
-  /** Ej.: «11 sep – 10 oct 2026» */
+  /** Ej.: «11 sep – 10 oct 2026» o «Octubre 2026» */
   label: string
-  /** Ej.: «Sep–Oct» */
+  /** Ej.: «Sep–Oct» o «Octubre» */
   shortLabel: string
 }
 
@@ -40,37 +47,82 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-function buildPeriod(startYear: number, startMonth: number): CutPeriod {
-  const start = toISODate({ year: startYear, month: startMonth, day: CUT_START_DAY })
-  const endDate = addMonthsClamped(start, 1, CUT_END_DAY)
+function lastDayOfMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate()
+}
+
+export function buildPeriod(
+  startYear: number,
+  startMonth: number,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod {
+  const isCalendarMonth =
+    cycleConfig.type === 'calendar_month' || cycleConfig.cutStartDay === 1
+
+  if (isCalendarMonth) {
+    const start = toISODate({ year: startYear, month: startMonth, day: 1 })
+    const lastDay = lastDayOfMonth(startYear, startMonth)
+    const end = toISODate({ year: startYear, month: startMonth, day: lastDay })
+    const mName = monthName(startYear, startMonth)
+    return {
+      id: `${startYear}-${String(startMonth).padStart(2, '0')}`,
+      start,
+      end,
+      label: `1 – ${lastDay} ${mName} ${startYear}`,
+      shortLabel: `${capitalize(mName)} ${startYear}`,
+    }
+  }
+
+  // Corte personalizado (ej. 11 al 10)
+  const cutStart = cycleConfig.cutStartDay || 11
+  const cutEnd = cutStart - 1
+  const start = toISODate({ year: startYear, month: startMonth, day: cutStart })
+  const endDate = addMonthsClamped(start, 1, cutEnd)
   const { year: endYear, month: endMonth } = parseISODate(endDate)
   const startName = monthName(startYear, startMonth)
   const endName = monthName(endYear, endMonth)
   const label =
     startYear === endYear
-      ? `${CUT_START_DAY} ${startName} – ${CUT_END_DAY} ${endName} ${endYear}`
-      : `${CUT_START_DAY} ${startName} ${startYear} – ${CUT_END_DAY} ${endName} ${endYear}`
+      ? `${cutStart} ${startName} – ${cutEnd} ${endName} ${endYear}`
+      : `${cutStart} ${startName} ${startYear} – ${cutEnd} ${endName} ${endYear}`
+
   return {
     id: `${startYear}-${String(startMonth).padStart(2, '0')}`,
     start,
     end: endDate,
     label,
-    shortLabel: `${capitalize(startName)}–${capitalize(endName)}${startYear !== endYear ? ` ${String(endYear).slice(2)}` : ''}`,
+    shortLabel: `${capitalize(startName)}–${capitalize(endName)}${
+      startYear !== endYear ? ` ${String(endYear).slice(2)}` : ''
+    }`,
   }
 }
 
-/** Corte al que pertenece una fecha local. */
-export function getPeriodForDate(date: ISODate): CutPeriod {
+/** Corte al que pertenece una fecha local según la configuración del ciclo del usuario. */
+export function getPeriodForDate(
+  date: ISODate,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod {
   const { year, month, day } = parseISODate(date)
-  if (day >= CUT_START_DAY) return buildPeriod(year, month)
+  const isCalendarMonth =
+    cycleConfig.type === 'calendar_month' || cycleConfig.cutStartDay === 1
+
+  if (isCalendarMonth) {
+    return buildPeriod(year, month, cycleConfig)
+  }
+
+  const cutStart = cycleConfig.cutStartDay || 11
+  if (day >= cutStart) return buildPeriod(year, month, cycleConfig)
   const prevMonth = month === 1 ? 12 : month - 1
   const prevYear = month === 1 ? year - 1 : year
-  return buildPeriod(prevYear, prevMonth)
+  return buildPeriod(prevYear, prevMonth, cycleConfig)
 }
 
-/** Corte actual según la fecha local de Bogotá. */
-export function getCurrentPeriod(now: Date = new Date()): CutPeriod {
-  return getPeriodForDate(todayInBogota(now))
+/** Corte actual según la fecha local de Bogotá y la configuración del ciclo del usuario. */
+export function getCurrentPeriod(
+  now: Date = new Date(),
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod {
+  return getPeriodForDate(todayInBogota(now), cycleConfig)
 }
 
 export function isValidPeriodId(id: string): boolean {
@@ -80,36 +132,62 @@ export function isValidPeriodId(id: string): boolean {
   return month >= 1 && month <= 12
 }
 
-export function getPeriodById(id: string): CutPeriod {
+export function getPeriodById(
+  id: string,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod {
   const m = PERIOD_ID_RE.exec(id)
   if (!m || !isValidPeriodId(id)) throw new Error(`Identificador de corte inválido: ${id}`)
-  return buildPeriod(Number(m[1]), Number(m[2]))
+  return buildPeriod(Number(m[1]), Number(m[2]), cycleConfig)
 }
 
-export function shiftPeriod(period: CutPeriod, offset: number): CutPeriod {
+export function shiftPeriod(
+  period: CutPeriod,
+  offset: number,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod {
   const { year, month } = parseISODate(period.start)
   const total = year * 12 + (month - 1) + offset
-  return buildPeriod(Math.floor(total / 12), (total % 12) + 1)
+  return buildPeriod(Math.floor(total / 12), (total % 12) + 1, cycleConfig)
 }
 
-export const getPreviousPeriod = (p: CutPeriod) => shiftPeriod(p, -1)
-export const getNextPeriod = (p: CutPeriod) => shiftPeriod(p, 1)
+export const getPreviousPeriod = (
+  p: CutPeriod,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+) => shiftPeriod(p, -1, cycleConfig)
+
+export const getNextPeriod = (
+  p: CutPeriod,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+) => shiftPeriod(p, 1, cycleConfig)
 
 /** Indica si un corte corresponde a un periodo posterior al corte activo actual. */
-export function isFuturePeriod(period: CutPeriod, now: Date = new Date()): boolean {
-  const current = getCurrentPeriod(now)
+export function isFuturePeriod(
+  period: CutPeriod,
+  now: Date = new Date(),
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): boolean {
+  const current = getCurrentPeriod(now, cycleConfig)
   return period.id > current.id
 }
 
 /** Indica si un corte es exactamente el corte activo actual en Bogotá. */
-export function isCurrentPeriod(period: CutPeriod, now: Date = new Date()): boolean {
-  const current = getCurrentPeriod(now)
+export function isCurrentPeriod(
+  period: CutPeriod,
+  now: Date = new Date(),
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): boolean {
+  const current = getCurrentPeriod(now, cycleConfig)
   return period.id === current.id
 }
 
 /** Determina si es posible avanzar al siguiente corte (solo si no estamos ya en el actual). */
-export function canNavigateToNextPeriod(period: CutPeriod, now: Date = new Date()): boolean {
-  const current = getCurrentPeriod(now)
+export function canNavigateToNextPeriod(
+  period: CutPeriod,
+  now: Date = new Date(),
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): boolean {
+  const current = getCurrentPeriod(now, cycleConfig)
   return period.id < current.id
 }
 
@@ -118,8 +196,14 @@ export function isDateInPeriod(date: ISODate, period: CutPeriod): boolean {
 }
 
 /** Los últimos `count` cortes terminando en `period` (orden cronológico). */
-export function getRecentPeriods(period: CutPeriod, count: number): CutPeriod[] {
-  return Array.from({ length: count }, (_, i) => shiftPeriod(period, i - (count - 1)))
+export function getRecentPeriods(
+  period: CutPeriod,
+  count: number,
+  cycleConfig: FinancialCycleConfig = DEFAULT_CYCLE_CONFIG
+): CutPeriod[] {
+  return Array.from({ length: count }, (_, i) =>
+    shiftPeriod(period, i - (count - 1), cycleConfig)
+  )
 }
 
 export function periodLengthInDays(period: CutPeriod): number {

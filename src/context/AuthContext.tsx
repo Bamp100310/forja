@@ -9,6 +9,7 @@ interface AuthContextType {
   isConfigured: boolean
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
+  enterDemoMode: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -77,9 +78,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [setupUser])
 
+  const enterDemoMode = useCallback(() => {
+    const demoUser: User = {
+      id: '00000000-0000-0000-0000-000000000000',
+      app_metadata: {},
+      user_metadata: {},
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+      email: 'operario@forja.test',
+    }
+    setUser(demoUser)
+  }, [])
+
   const signOut = useCallback(async () => {
-    if (!supabase) return
-    await supabase.auth.signOut()
+    if (supabase) {
+      try {
+        await supabase.auth.signOut()
+      } catch {
+        // ignore
+      }
+    }
     setUser(null)
     setSession(null)
   }, [])
@@ -93,6 +111,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isConfigured: isSupabaseConfigured,
         signIn,
         signOut,
+        enterDemoMode,
       }}
     >
       {children}

@@ -2,11 +2,12 @@ import React, { useState } from 'react'
 import { Lock, Mail, AlertTriangle, ShieldCheck, Key } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { PixelSprite } from '../components/common/PixelSprite'
+import { ForjaLogo } from '../components/common/ForjaLogo'
 import { sound } from '../services/sound'
 import { triggerButtonSparks } from '../components/common/PixelSparks'
 
 export const LoginPage: React.FC = () => {
-  const { signIn } = useAuth()
+  const { signIn, enterDemoMode } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -52,21 +53,10 @@ export const LoginPage: React.FC = () => {
       />
 
       <div className="max-w-md w-full relative z-10">
-        {/* Placa de Cabecera con Logotipo y Sprites */}
+        {/* Placa de Cabecera Oficial FORJA II */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3 rounded-md bg-[#111c17] border-2 border-[#2b4c3e] shadow-2xl mb-3 relative">
-            <PixelSprite name="cog" size={38} className="animate-spin-slow" />
-            <div className="absolute -bottom-1 -right-1 bg-amber-500/90 rounded-full p-1 border border-[#111c17]">
-              <Lock size={12} className="text-[#0a0f0d]" />
-            </div>
-          </div>
-          <h1 className="font-stencil text-3xl font-black tracking-widest text-emerald-400 drop-shadow-md">
-            FORJA
-          </h1>
-          <p className="text-[11px] font-stencil text-amber-300 tracking-wider uppercase mt-0.5">
-            TALLER FINANCIERO PERSONAL
-          </p>
-          <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#16251f] border border-[#264438] text-[10px] text-emerald-300 font-pixel">
+          <ForjaLogo variant="full" showSubtitle={true} />
+          <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#16251f] border border-[#264438] text-[10px] text-emerald-300 font-pixel">
             <span className="led-pilot led-pilot-online" />
             <span>ESTACIÓN DE ACCESO SEGURO</span>
           </div>
@@ -126,7 +116,7 @@ export const LoginPage: React.FC = () => {
               />
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -135,6 +125,18 @@ export const LoginPage: React.FC = () => {
               >
                 <PixelSprite name="tools" size={16} />
                 <span>{isSubmitting ? 'VERIFICANDO EN EL REGISTRO...' : 'ACCEDER AL TALLER'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playConfirm()
+                  enterDemoMode()
+                }}
+                className="w-full btn-game btn-game-secondary py-2 text-xs text-amber-300 font-pixel font-bold flex items-center justify-center gap-2 cursor-pointer border border-[#394d43]"
+              >
+                <PixelSprite name="cog" size={14} />
+                <span>ENTRAR EN MODO SIMULACIÓN / OPERARIO LOCAL</span>
               </button>
             </div>
           </form>
