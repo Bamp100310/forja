@@ -230,6 +230,8 @@ Comando ejecutado: `npx vitest run --reporter=verbose`
     * *Motivo:* Automatización del pipeline de CI/CD para GitHub Pages con ejecución de `vitest`, verificación de `eslint` y compilación de producción con variables de Supabase validadas.
 19. `src/services/api.ts`, `src/context/ForjaContext.tsx`, `src/components/forms/QuickTransactionModal.tsx`:
     * *Motivo:* Subsanar error `duplicate key value violates unique constraint "transactions_pkey"` al editar movimientos en Supabase. Se preserva el `client_request_id` original al guardar modificaciones y se incorpora un mecanismo de fallback resiliente con actualización directa de cabecera y reemplazo de asientos balanceados en caso de que la función remota `save_transaction_atomic` aún no cuente con la migración 20261013000000.
+20. `src/components/forms/QuickTransactionModal.tsx`, `src/pages/AccountsPage.tsx`, `src/components/dashboard/ResourceGaugesGrid.tsx`, `src/context/ForjaContext.tsx`:
+    * *Motivo:* Implementación del flujo de cobro y liquidación de saldos en plataformas de reparto (Rappi, DiDi). Habilita en la pestaña «COBRAR» la selección entre plataformas o préstamos, selección de monto parcial o total (para cobros de pedidos pagados en efectivo en mano), selección de bóveda de destino (Efectivo/Caja por defecto) y botones de acción directos en las tarjetas de bóvedas por cobrar.
 
 ---
 
@@ -264,4 +266,4 @@ Para asegurar que la función de guardado atómico incluya la corrección de edi
 ---
 
 **Conclusión de la Auditoría y Lanzamiento:**  
-FORJA cuenta con un motor contable robusto, validado por partida doble y libre de errores en el manejo de moneda colombiana. Los módulos de detalle financiero y edición completa de entidades (Transacciones, Cuentas, Deudas, Préstamos y Recurrentes) han sido implementados y comprobados integralmente con 77 pruebas automatizadas (incluyendo integración con PostgreSQL/PGlite), cero errores de linters y compilación exitosa. La aplicación queda configurada para despliegue automatizado en GitHub Pages y conectada de forma segura a Supabase.
+FORJA cuenta con un motor contable robusto, validado por partida doble y libre de errores en el manejo de moneda colombiana. Los módulos de detalle financiero, cobros en efectivo de plataformas (Rappi) y edición completa de entidades (Transacciones, Cuentas, Deudas, Préstamos y Recurrentes) han sido implementados y comprobados integralmente con 78 pruebas automatizadas (incluyendo integración con PostgreSQL/PGlite), cero errores de linters y compilación exitosa. La aplicación queda configurada para despliegue automatizado en GitHub Pages y conectada de forma segura a Supabase.

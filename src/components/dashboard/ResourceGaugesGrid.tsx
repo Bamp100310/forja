@@ -137,7 +137,7 @@ const IndustrialGaugeCard: React.FC<GaugeCardProps> = ({
 }
 
 export const ResourceGaugesGrid: React.FC = () => {
-  const { summary, balances } = useForja()
+  const { summary, balances, openQuickModal } = useForja()
 
   const incomeDayAvg = summary.incomeDays > 0 ? Math.round(summary.income / summary.incomeDays) : 0
   const expenseRatio = summary.income > 0 ? summary.expense / summary.income : 0
@@ -234,10 +234,22 @@ export const ResourceGaugesGrid: React.FC = () => {
             sprite="vault"
             tone="cyan"
             metricDetail={{
-              label: 'Apps retenido',
+              label: balances.platformReceivable > 0 ? 'Apps (clic p/ cobrar)' : 'Apps retenido',
               value: formatCOPCompact(balances.platformReceivable),
             }}
-            tooltip="Suma disponible en cuentas de ahorro, billeteras (Nequi, Daviplata) y efectivo"
+            tooltip={
+              balances.platformReceivable > 0
+                ? 'Suma líquida. Haz clic aquí para cobrar pedidos en efectivo o liquidar saldos de Rappi/apps.'
+                : 'Suma disponible en cuentas de ahorro, billeteras (Nequi, Daviplata) y efectivo'
+            }
+            onClick={
+              balances.platformReceivable > 0
+                ? () =>
+                    openQuickModal('loan_repayment', null, {
+                      collectionSource: 'platform',
+                    })
+                : undefined
+            }
           />
 
           {/* 6. Deudas pendientes */}
@@ -252,7 +264,8 @@ export const ResourceGaugesGrid: React.FC = () => {
               label: 'Obligaciones',
               value: 'Abonos periódicos',
             }}
-            tooltip="Monto total adeudado a entidades financieras y tarjetas"
+            tooltip="Monto total adeudado. Haz clic para registrar un abono a capital o cuota."
+            onClick={() => openQuickModal('debt_payment')}
           />
 
           {/* 7. Cuentas por cobrar a terceros */}
@@ -267,7 +280,12 @@ export const ResourceGaugesGrid: React.FC = () => {
               label: 'Por recuperar',
               value: formatCOPCompact(balances.loansPending),
             }}
-            tooltip="Capital prestado a amigos o familiares pendiente de recuperación. No es gasto."
+            tooltip="Capital prestado a amigos o familiares pendiente de recuperación. Haz clic para registrar una devolución."
+            onClick={() =>
+              openQuickModal('loan_repayment', null, {
+                collectionSource: 'loan',
+              })
+            }
           />
 
           {/* 8. Rendimiento de la moto */}

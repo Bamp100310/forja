@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, AlertCircle } from 'lucide-react'
 import { PixelSprite } from '../common/PixelSprite'
 import { useForja } from '../../context/ForjaContext'
 import { MoneyInput } from './MoneyInput'
 import { buildTransactionDraft, type OperationInput } from '../../domain/ledger/operations'
-import { TRANSACTION_KIND_LABELS, type TransactionKind } from '../../domain/types'
+import { TRANSACTION_KIND_LABELS, ACCOUNT_KIND_LABELS, type TransactionKind } from '../../domain/types'
+import { formatCOP, formatCOPCompact } from '../../domain/money'
 import { generateUUID } from '../../domain/uuid'
 import { sound } from '../../services/sound'
 import { triggerPixelSparks } from '../common/PixelSparks'
@@ -40,6 +41,7 @@ export const QuickTransactionModal: React.FC = () => {
     quickModalOpen,
     quickModalKind,
     editingTransaction,
+    quickModalPrefill,
     closeQuickModal,
     saveTransaction,
     today,
@@ -47,6 +49,7 @@ export const QuickTransactionModal: React.FC = () => {
     accounts,
     debts,
     loans,
+    balances,
   } = useForja()
 
   const [kind, setKind] = useState<TransactionKind>(quickModalKind)
@@ -71,13 +74,29 @@ export const QuickTransactionModal: React.FC = () => {
   const [interest, setInterest] = useState<number>(0)
   const [debtFees, setDebtFees] = useState<number>(0)
 
-  // Préstamos
+  // Préstamos y Cobros de plataforma
+  const [collectionSource, setCollectionSource] = useState<'platform' | 'loan'>('platform')
+  const [platformAccountId, setPlatformAccountId] = useState<string>('')
   const [loanId, setLoanId] = useState<string>('')
   const [loanPersonName, setLoanPersonName] = useState<string>('')
   const [loanDueDate, setLoanDueDate] = useState<string>('')
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  // Listas derivadas
+  const platformAccounts = useMemo(
+    () => accounts.filter((a) => a.kind === 'platform_receivable'),
+    [accounts]
+  )
+  const liquidAccounts = useMemo(
+    () => accounts.filter((a) => ['cash', 'wallet', 'bank', 'savings', 'other'].includes(a.kind)),
+    [accounts]
+  )
+  const currentPlatformBalance = useMemo(
+    () => (platformAccountId ? balances.accountBalance.get(platformAccountId) ?? 0 : 0),
+    [platformAccountId, balances.accountBalance]
+  )
 
   const isNewLoan =
     kind === 'loan_given' &&
@@ -160,6 +179,7 @@ export const QuickTransactionModal: React.FC = () => {
           const loanPosting = editingTransaction.postings.find((p) => p.targetType === 'loan')
           const intPosting = editingTransaction.postings.find((p) => p.role === 'interest')
 
+          setCollectionSource('loan')
           setPrincipal(Number(meta.principal ?? (loanPosting ? Math.abs(loanPosting.amount) : 0)))
           setInterest(Number(meta.interest ?? (intPosting ? Math.abs(intPosting.amount) : 0)))
           setLoanId(meta.loanId || loanPosting?.targetId || editingTransaction.loanId || (loans[0]?.id ?? ''))
@@ -169,9 +189,7 @@ export const QuickTransactionModal: React.FC = () => {
         // Inicialización habitual para nuevo movimiento
         setKind(quickModalKind)
         setDate(today)
-        setDescription('')
-        setNotes('')
-        setAmount(0)
+        setNotes(quickModalPrefill?.notes || '')
         setCommission(0)
         setTip(0)
         setFee(0)
@@ -181,7 +199,74 @@ export const QuickTransactionModal: React.FC = () => {
         setLoanPersonName('')
         setLoanDueDate('')
 
-        // Seleccionar valores por defecto razonables
+        // Determinar si en 'loan_repayment' (COBRAR) iniciamos en Plataforma o en Préstamo
+        const hasPlatforms = platformAccounts.length > 0
+        const hasLoans = loans.length > 0
+        const initialCollectionSource: 'platform' | 'loan' =
+          quickModalPrefill?.collectionSource ??
+          (quickModalPrefill?.fromAccountId &&
+          platformAccounts.some((p) => p.id === quickModalPrefill.fromAccountId)
+            ? 'platform'
+            : !hasLoans && hasPlatforms
+            ? 'platform'
+            : hasLoans && !hasPlatforms
+            ? 'loan'
+            : 'platform')
+        setCollectionSource(initialCollectionSource)
+
+        // Plataforma por defecto
+        const defaultPlatform =
+          platformAccounts.find((p) => p.id === quickModalPrefill?.fromAccountId) ||
+          platformAccounts[0]
+        if (defaultPlatform) {
+          setPlatformAccountId(defaultPlatform.id)
+        } else if (accounts.length > 0) {
+          setPlatformAccountId(accounts[0].id)
+        }
+
+        // Bóveda de destino (por defecto efectivo para repartos de rappi)
+        const cashAcc = accounts.find((a) => a.kind === 'cash')
+        const defaultDest =
+          accounts.find((a) => a.id === quickModalPrefill?.toAccountId) ||
+          cashAcc ||
+          liquidAccounts[0] ||
+          accounts[0]
+        if (defaultDest) {
+          setToAccountId(defaultDest.id)
+        }
+
+        // Monto
+        if (quickModalPrefill?.amount) {
+          setAmount(quickModalPrefill.amount)
+        } else {
+          setAmount(0)
+        }
+
+        // Descripción
+        if (quickModalPrefill?.description) {
+          setDescription(quickModalPrefill.description)
+        } else if (quickModalKind === 'loan_repayment' && initialCollectionSource === 'platform') {
+          setDescription(
+            defaultPlatform
+              ? defaultDest?.kind === 'cash'
+                ? `Cobro en efectivo pedido ${defaultPlatform.name}`
+                : `Liquidación saldo ${defaultPlatform.name}`
+              : 'Cobro en efectivo plataforma'
+          )
+        } else {
+          setDescription('')
+        }
+
+        // isMoto
+        if (quickModalPrefill?.isMoto !== undefined) {
+          setIsMoto(quickModalPrefill.isMoto)
+        } else if (quickModalKind === 'loan_repayment' && initialCollectionSource === 'platform') {
+          setIsMoto(true)
+        } else {
+          setIsMoto(false)
+        }
+
+        // Seleccionar valores por defecto de categorías
         const incCats = categories.filter((c) => c.kind === 'income' && !c.isArchived)
         const expCats = categories.filter((c) => c.kind === 'expense' && !c.isArchived)
         if (quickModalKind === 'income' && incCats.length > 0) {
@@ -193,22 +278,38 @@ export const QuickTransactionModal: React.FC = () => {
         }
 
         if (accounts.length > 0) {
-          setAccountId(accounts[0].id)
-          if (accounts.length > 1) setToAccountId(accounts[1].id)
+          setAccountId(
+            quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
+          )
+          if (accounts.length > 1 && !quickModalPrefill?.toAccountId) {
+            setToAccountId(accounts[1].id)
+          }
         }
-        if (debts.length > 0) setDebtId(debts[0].id)
+        if (debts.length > 0) setDebtId(quickModalPrefill?.debtId || debts[0].id)
         else setDebtId('')
 
         if (quickModalKind === 'loan_given') {
-          setLoanId(loans.length > 0 ? loans[0].id : '__new__')
+          setLoanId(quickModalPrefill?.loanId || (loans.length > 0 ? loans[0].id : '__new__'))
         } else if (quickModalKind === 'loan_repayment') {
-          setLoanId(loans.length > 0 ? loans[0].id : '')
+          setLoanId(quickModalPrefill?.loanId || (loans.length > 0 ? loans[0].id : ''))
         } else {
           setLoanId(loans.length > 0 ? loans[0].id : '__new__')
         }
       }
     }
-  }, [quickModalOpen, quickModalKind, editingTransaction, today, categories, accounts, debts, loans])
+  }, [
+    quickModalOpen,
+    quickModalKind,
+    editingTransaction,
+    quickModalPrefill,
+    today,
+    categories,
+    accounts,
+    debts,
+    loans,
+    platformAccounts,
+    liquidAccounts,
+  ])
 
   const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value
@@ -395,29 +496,63 @@ export const QuickTransactionModal: React.FC = () => {
             : undefined,
         }
       } else if (kind === 'loan_repayment') {
-        if (loans.length === 0) {
-          throw new Error('No tienes préstamos registrados para cobrar.')
-        }
-        if (!loanId || loanId === '__new__' || !loans.some((l) => l.id === loanId)) {
-          throw new Error('Selecciona el préstamo o deudor correspondiente.')
-        }
-        if (!accountId) {
-          throw new Error('Selecciona la bóveda donde recibes el dinero.')
-        }
-        const total = principal + (interest || 0)
-        if (total <= 0) {
-          throw new Error('La devolución debe ser mayor que cero (ingresa capital o intereses).')
-        }
-        const debtorName = loans.find((l) => l.id === loanId)?.personName || 'deudor'
-        op = {
-          kind: 'loan_repayment',
-          date,
-          description: description.trim() || `Devolución de préstamo de ${debtorName}`,
-          notes: notes.trim() || null,
-          loanId,
-          accountId,
-          principal,
-          interest: interest > 0 ? interest : undefined,
+        if (collectionSource === 'platform') {
+          if (amount <= 0) {
+            throw new Error('El valor a cobrar debe ser mayor que cero.')
+          }
+          if (!platformAccountId) {
+            throw new Error('Selecciona la plataforma de origen (Rappi, etc.).')
+          }
+          if (!toAccountId) {
+            throw new Error('Selecciona la bóveda donde recibes el dinero.')
+          }
+          if (platformAccountId === toAccountId) {
+            throw new Error('La plataforma de origen y la bóveda de destino deben ser distintas.')
+          }
+
+          const platformAcc = accounts.find((a) => a.id === platformAccountId)
+          const destAcc = accounts.find((a) => a.id === toAccountId)
+          const fallbackDesc =
+            destAcc?.kind === 'cash'
+              ? `Cobro en efectivo pedido ${platformAcc?.name || 'Rappi'}`
+              : `Liquidación saldo ${platformAcc?.name || 'plataforma'}`
+
+          op = {
+            kind: 'transfer',
+            date,
+            description: description.trim() || fallbackDesc,
+            notes: notes.trim() || null,
+            fromAccountId: platformAccountId,
+            toAccountId,
+            amount,
+            fee: 0,
+            isMoto,
+          }
+        } else {
+          if (loans.length === 0) {
+            throw new Error('No tienes préstamos registrados para cobrar.')
+          }
+          if (!loanId || loanId === '__new__' || !loans.some((l) => l.id === loanId)) {
+            throw new Error('Selecciona el préstamo o deudor correspondiente.')
+          }
+          if (!accountId) {
+            throw new Error('Selecciona la bóveda donde recibes el dinero.')
+          }
+          const total = principal + (interest || 0)
+          if (total <= 0) {
+            throw new Error('La devolución debe ser mayor que cero (ingresa capital o intereses).')
+          }
+          const debtorName = loans.find((l) => l.id === loanId)?.personName || 'deudor'
+          op = {
+            kind: 'loan_repayment',
+            date,
+            description: description.trim() || `Devolución de préstamo de ${debtorName}`,
+            notes: notes.trim() || null,
+            loanId,
+            accountId,
+            principal,
+            interest: interest > 0 ? interest : undefined,
+          }
         }
       } else {
         throw new Error('Tipo de operación no soportado en formulario rápido')
@@ -961,75 +1096,266 @@ export const QuickTransactionModal: React.FC = () => {
               </>
             )}
 
-            {/* FORMULARIO DE COBRO DE PRÉSTAMO */}
+            {/* FORMULARIO DE COBRO (PLATAFORMA O PRÉSTAMO) */}
             {kind === 'loan_repayment' && (
               <>
-                {loans.length === 0 ? (
-                  <div className="p-3 bg-amber-950/60 border border-amber-800 text-amber-300 rounded-xs text-xs font-pixel">
-                    No tienes préstamos registrados pendientes de cobro. Primero forja un préstamo en la pestaña «PRESTAR».
-                  </div>
+                {/* Selector de sub-origen del cobro */}
+                <div className="flex gap-2 p-1 bg-[#0b1411] border border-[#1d332a] rounded-xs mb-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCollectionSource('platform')
+                      const pAcc =
+                        accounts.find((a) => a.id === platformAccountId) || platformAccounts[0]
+                      const dest = accounts.find((a) => a.id === toAccountId)
+                      if (pAcc) {
+                        setDescription(
+                          dest?.kind === 'cash'
+                            ? `Cobro en efectivo pedido ${pAcc.name}`
+                            : `Liquidación saldo ${pAcc.name}`
+                        )
+                      }
+                      setIsMoto(true)
+                    }}
+                    className={`flex-1 py-1.5 px-2 text-xs font-pixel tracking-wider uppercase rounded-xs border transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                      collectionSource === 'platform'
+                        ? 'btn-game btn-game-primary font-bold shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-[#13231e]'
+                    }`}
+                  >
+                    <PixelSprite name="conveyor" size={14} />
+                    <span>PLATAFORMA / EFECTIVO ({platformAccounts.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCollectionSource('loan')
+                      setDescription('')
+                      setIsMoto(false)
+                    }}
+                    className={`flex-1 py-1.5 px-2 text-xs font-pixel tracking-wider uppercase rounded-xs border transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                      collectionSource === 'loan'
+                        ? 'btn-game btn-game-primary font-bold shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-[#13231e]'
+                    }`}
+                  >
+                    <PixelSprite name="sack" size={14} />
+                    <span>PRÉSTAMO A TERCEROS ({loans.length})</span>
+                  </button>
+                </div>
+
+                {collectionSource === 'platform' ? (
+                  <>
+                    {platformAccounts.length === 0 ? (
+                      <div className="p-3 bg-amber-950/60 border border-amber-800 text-amber-300 rounded-xs text-xs font-pixel">
+                        No tienes bóvedas de tipo «Plataforma por cobrar» (Rappi, DiDi, etc.). Puedes crear una en la sección de Bóvedas.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="p-2.5 bg-[#121c17] border border-amber-800/60 rounded-xs text-[11px] text-amber-300 font-pixel flex items-start gap-2.5 mb-2">
+                          <PixelSprite name="moto" size={18} className="shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-amber-200 block">
+                              COBRO DE PEDIDOS EN EFECTIVO O DISPERSIÓN DE APP
+                            </span>
+                            <p className="text-slate-300 leading-snug">
+                              Si cobraste un pedido en efectivo, ese dinero entra a tu bolsillo (Efectivo) y la app te descuenta el saldo por cobrar. Aquí registras ese cobro poco a poco.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                              MONTO A COBRAR (COP)
+                            </label>
+                            {currentPlatformBalance > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setAmount(Math.max(0, currentPlatformBalance))}
+                                className="text-[10px] font-pixel text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                              >
+                                Cobrar todo ({formatCOPCompact(currentPlatformBalance)})
+                              </button>
+                            )}
+                          </div>
+                          <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
+
+                          {/* Botones rápidos de incremento */}
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            <span className="text-[10px] text-slate-500 font-pixel">Sumar:</span>
+                            {[10_000, 20_000, 50_000, 100_000].map((inc) => (
+                              <button
+                                key={inc}
+                                type="button"
+                                onClick={() => setAmount((v) => v + inc)}
+                                className="btn-game btn-game-secondary text-[10px] py-0.5 px-2 font-mono cursor-pointer"
+                              >
+                                +{formatCOPCompact(inc)}
+                              </button>
+                            ))}
+                            {amount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setAmount(0)}
+                                className="text-[10px] text-rose-400 hover:text-rose-300 font-pixel ml-auto cursor-pointer"
+                              >
+                                Limpiar
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                              PLATAFORMA DE ORIGEN (REDUCE SALDO)
+                            </label>
+                            <select
+                              value={platformAccountId}
+                              onChange={(e) => {
+                                const newId = e.target.value
+                                setPlatformAccountId(newId)
+                                const pAcc = accounts.find((a) => a.id === newId)
+                                const dest = accounts.find((a) => a.id === toAccountId)
+                                if (pAcc) {
+                                  setDescription(
+                                    dest?.kind === 'cash'
+                                      ? `Cobro en efectivo pedido ${pAcc.name}`
+                                      : `Liquidación saldo ${pAcc.name}`
+                                  )
+                                }
+                              }}
+                              required
+                              className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {platformAccounts.map((a) => {
+                                const bal = balances.accountBalance.get(a.id) ?? 0
+                                return (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} — Saldo: {formatCOP(bal)}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                            <div className="flex items-center justify-between text-[11px] font-pixel text-slate-400 mt-1 px-0.5">
+                              <span>Saldo en plataforma:</span>
+                              <span className="text-amber-400 font-bold font-mono">
+                                {formatCOP(currentPlatformBalance)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                              BÓVEDA DE DESTINO (ENTRA EL DINERO)
+                            </label>
+                            <select
+                              value={toAccountId}
+                              onChange={(e) => {
+                                const newDestId = e.target.value
+                                setToAccountId(newDestId)
+                                const dest = accounts.find((a) => a.id === newDestId)
+                                const pAcc = accounts.find((a) => a.id === platformAccountId)
+                                if (dest?.kind === 'cash') {
+                                  setDescription(
+                                    `Cobro en efectivo pedido ${pAcc?.name || 'Rappi'}`
+                                  )
+                                } else {
+                                  setDescription(
+                                    `Liquidación ${pAcc?.name || 'Rappi'} a ${dest?.name || 'cuenta'}`
+                                  )
+                                }
+                              }}
+                              required
+                              className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {liquidAccounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Disponible'})
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-slate-500 font-pixel mt-1 block">
+                              Usa «Efectivo» si te pagaron en mano; o «Nequi/Banco» si fue retiro.
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </>
                 ) : (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                          PRÉSTAMO / DEUDOR
-                        </label>
-                        <select
-                          value={loanId}
-                          onChange={(e) => setLoanId(e.target.value)}
-                          required
-                          className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                        >
-                          <option value="" disabled>
-                            Selecciona el deudor...
-                          </option>
-                          {loans.map((l) => (
-                            <option key={l.id} value={l.id}>
-                              {l.personName}
-                            </option>
-                          ))}
-                        </select>
+                    {loans.length === 0 ? (
+                      <div className="p-3 bg-amber-950/60 border border-amber-800 text-amber-300 rounded-xs text-xs font-pixel">
+                        No tienes préstamos a personas registrados pendientes de cobro. Primero forja un préstamo en la pestaña «PRESTAR».
                       </div>
-                      <div>
-                        <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                          BÓVEDA DONDE RECIBO EL DINERO
-                        </label>
-                        <select
-                          value={accountId}
-                          onChange={(e) => setAccountId(e.target.value)}
-                          required
-                          className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                        >
-                          {accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                              PRÉSTAMO / DEUDOR
+                            </label>
+                            <select
+                              value={loanId}
+                              onChange={(e) => setLoanId(e.target.value)}
+                              required
+                              className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              <option value="" disabled>
+                                Selecciona el deudor...
+                              </option>
+                              {loans.map((l) => (
+                                <option key={l.id} value={l.id}>
+                                  {l.personName}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                              BÓVEDA DONDE RECIBO EL DINERO
+                            </label>
+                            <select
+                              value={accountId}
+                              onChange={(e) => setAccountId(e.target.value)}
+                              required
+                              className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {accounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                        CAPITAL DEVUELTO (REDUCE SALDO)
-                      </label>
-                      <MoneyInput value={principal} onChange={setPrincipal} required placeholder="0" />
-                    </div>
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                            CAPITAL DEVUELTO (REDUCE SALDO)
+                          </label>
+                          <MoneyInput value={principal} onChange={setPrincipal} required placeholder="0" />
+                        </div>
 
-                    <div>
-                      <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                        INTERESES PACTADOS RECIBIDOS (INGRESO)
-                      </label>
-                      <MoneyInput value={interest} onChange={setInterest} placeholder="0" />
-                    </div>
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                            INTERESES PACTADOS RECIBIDOS (INGRESO)
+                          </label>
+                          <MoneyInput value={interest} onChange={setInterest} placeholder="0" />
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </>
             )}
 
             {/* Checkbox de Motocicleta */}
-            {(kind === 'income' || kind === 'expense') && (
+            {(kind === 'income' ||
+              kind === 'expense' ||
+              (kind === 'loan_repayment' && collectionSource === 'platform')) && (
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
@@ -1038,7 +1364,10 @@ export const QuickTransactionModal: React.FC = () => {
                   onChange={(e) => setIsMoto(e.target.checked)}
                   className="rounded-xs border border-[#273e34] text-amber-500 focus:ring-amber-500 bg-[#070c0a] cursor-pointer"
                 />
-                <label htmlFor="moto-check" className="text-xs text-slate-300 font-pixel uppercase tracking-wider cursor-pointer select-none font-bold">
+                <label
+                  htmlFor="moto-check"
+                  className="text-xs text-slate-300 font-pixel uppercase tracking-wider cursor-pointer select-none font-bold"
+                >
                   Vincular a la Motocicleta (Taller de Moto)
                 </label>
               </div>

@@ -29,7 +29,21 @@ import type {
 } from '../domain/types'
 import type { TransactionDraft } from '../domain/ledger/operations'
 
-interface ForjaContextType {
+export interface QuickModalPrefill {
+  collectionSource?: 'platform' | 'loan'
+  fromAccountId?: string
+  toAccountId?: string
+  accountId?: string
+  amount?: number
+  description?: string
+  categoryId?: string
+  debtId?: string
+  loanId?: string
+  isMoto?: boolean
+  notes?: string
+}
+
+export interface ForjaContextType {
   // Estado del corte actual y navegación
   period: CutPeriod
   setPeriodId: (id: string) => void
@@ -94,7 +108,8 @@ interface ForjaContextType {
   quickModalOpen: boolean
   quickModalKind: TransactionKind
   editingTransaction: Transaction | null
-  openQuickModal: (kind?: TransactionKind, editingTx?: Transaction | null) => void
+  quickModalPrefill: QuickModalPrefill | null
+  openQuickModal: (kind?: TransactionKind, editingTx?: Transaction | null, prefill?: QuickModalPrefill | null) => void
   closeQuickModal: () => void
 
   // Control del modal de detalle de movimiento
@@ -140,16 +155,26 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [quickModalOpen, setQuickModalOpen] = useState(false)
   const [quickModalKind, setQuickModalKind] = useState<TransactionKind>('income')
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  const [quickModalPrefill, setQuickModalPrefill] = useState<QuickModalPrefill | null>(null)
 
-  const openQuickModal = useCallback((kind: TransactionKind = 'income', editingTx: Transaction | null = null) => {
-    setQuickModalKind(kind)
-    setEditingTransaction(editingTx)
-    setQuickModalOpen(true)
-  }, [])
+  const openQuickModal = useCallback(
+    (
+      kind: TransactionKind = 'income',
+      editingTx: Transaction | null = null,
+      prefill: QuickModalPrefill | null = null
+    ) => {
+      setQuickModalKind(kind)
+      setEditingTransaction(editingTx)
+      setQuickModalPrefill(prefill ?? null)
+      setQuickModalOpen(true)
+    },
+    []
+  )
 
   const closeQuickModal = useCallback(() => {
     setQuickModalOpen(false)
     setEditingTransaction(null)
+    setQuickModalPrefill(null)
   }, [])
 
   const refreshData = useCallback(async () => {
@@ -560,6 +585,7 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         quickModalOpen,
         quickModalKind,
         editingTransaction,
+        quickModalPrefill,
         openQuickModal,
         closeQuickModal,
         detailModalTx,

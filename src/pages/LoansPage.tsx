@@ -114,7 +114,7 @@ export const LoansPage: React.FC = () => {
             onClick={(e) => {
               sound.playClick()
               triggerButtonSparks(e, 'emerald', 14)
-              openQuickModal('loan_repayment')
+              openQuickModal('loan_repayment', null, { collectionSource: 'loan' })
             }}
             className="btn-game btn-game-secondary btn-forge-heat text-xs py-2 px-3 flex items-center gap-2 cursor-pointer font-pixel"
           >
@@ -261,7 +261,12 @@ export const LoansPage: React.FC = () => {
                   </span>
                   {summary.pending > 0 && (
                     <button
-                      onClick={() => openQuickModal('loan_repayment')}
+                      onClick={() =>
+                        openQuickModal('loan_repayment', null, {
+                          collectionSource: 'loan',
+                          loanId: loan.id,
+                        })
+                      }
                       className="btn-game btn-game-primary text-xs py-1.5 px-3 font-pixel flex items-center gap-1 shadow-xs"
                     >
                       <span>+ REGISTRAR ABONO</span>

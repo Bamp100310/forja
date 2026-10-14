@@ -272,4 +272,55 @@ describe('Fase 4 — Pruebas de flujos CRUD, edición y persistencia', () => {
     const found = reloadedAccounts.find((a) => a.id === acc.id)
     expect(found?.name).toBe('Bóveda Persistente Reload')
   })
+
+  it('10. Cobro parcial de saldo en plataforma (Rappi por cobrar) a efectivo cuando pagan pedidos en mano', async () => {
+    const categories = await forjaApi.getCategories()
+    const accounts = await forjaApi.getAccounts()
+    const debts = await forjaApi.getDebts()
+    const loans = await forjaApi.getLoans()
+
+    const rappiAcc = accounts.find((a) => a.kind === 'platform_receivable')!
+    const cashAcc = accounts.find((a) => a.kind === 'cash')!
+    expect(rappiAcc).toBeDefined()
+    expect(cashAcc).toBeDefined()
+
+    const index = buildLedgerIndex({ accounts, categories, debts, loans })
+
+    // Saldos previos
+    let txs = await forjaApi.getTransactions()
+    let totals = totalsFromTransactions(txs)
+    let balances = computeBalances(totals, index)
+    const rappiBalanceBefore = balances.accountBalance.get(rappiAcc.id) ?? 0
+    const cashBalanceBefore = balances.accountBalance.get(cashAcc.id) ?? 0
+
+    // Cobro en efectivo de pedido Rappi ($35.000)
+    const collectDraft = buildTransactionDraft(
+      {
+        kind: 'transfer',
+        date: '2026-10-14',
+        description: `Cobro en efectivo pedido ${rappiAcc.name}`,
+        fromAccountId: rappiAcc.id,
+        toAccountId: cashAcc.id,
+        amount: 35000,
+        fee: 0,
+        isMoto: true,
+      },
+      { categories }
+    )
+
+    await forjaApi.saveTransaction(collectDraft)
+
+    // Saldos posteriores
+    txs = await forjaApi.getTransactions()
+    totals = totalsFromTransactions(txs)
+    balances = computeBalances(totals, index)
+
+    const rappiBalanceAfter = balances.accountBalance.get(rappiAcc.id) ?? 0
+    const cashBalanceAfter = balances.accountBalance.get(cashAcc.id) ?? 0
+
+    // Se redujo el saldo en la app y aumentó el efectivo en mano
+    expect(rappiBalanceAfter).toBe(rappiBalanceBefore - 35000)
+    expect(cashBalanceAfter).toBe(cashBalanceBefore + 35000)
+    expect(balances.available).toBeGreaterThan(0)
+  })
 })

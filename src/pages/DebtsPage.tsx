@@ -310,7 +310,7 @@ export const DebtsPage: React.FC = () => {
                       HISTORIAL DE ABONOS ({summary.history.length})
                     </span>
                     <button
-                      onClick={() => openQuickModal('debt_payment')}
+                      onClick={() => openQuickModal('debt_payment', null, { debtId: debt.id })}
                       className="btn-game btn-game-primary text-[10px] py-1 px-2.5 font-stencil font-bold cursor-pointer"
                     >
                       + ABONAR

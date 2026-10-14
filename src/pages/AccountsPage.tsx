@@ -135,15 +135,35 @@ export const AccountsPage: React.FC = () => {
                 BÓVEDAS Y DISPONIBILIDAD LÍQUIDA
               </h2>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Disponible real:{' '}
-              <span className="font-pixel font-bold num text-emerald-400">
-                {formatCOP(balances.available)}
-              </span>{' '}
-              • Por liquidar en plataformas:{' '}
-              <span className="font-pixel font-bold num text-amber-400">
-                {formatCOP(balances.platformReceivable)}
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center flex-wrap gap-2">
+              <span>
+                Disponible real:{' '}
+                <span className="font-pixel font-bold num text-emerald-400">
+                  {formatCOP(balances.available)}
+                </span>
               </span>
+              <span>•</span>
+              <span>
+                Por liquidar en plataformas:{' '}
+                <span className="font-pixel font-bold num text-amber-400">
+                  {formatCOP(balances.platformReceivable)}
+                </span>
+              </span>
+              {balances.platformReceivable > 0 && (
+                <button
+                  onClick={(e) => {
+                    sound.playClick()
+                    triggerButtonSparks(e, 'amber', 14)
+                    openQuickModal('loan_repayment', null, {
+                      collectionSource: 'platform',
+                    })
+                  }}
+                  className="badge-pixel bg-amber-950/80 text-amber-300 border-amber-600 hover:bg-amber-900/90 text-[9px] px-2 py-0.5 cursor-pointer font-pixel transition-colors"
+                  title="Cobrar pedidos en efectivo o liquidar saldo de aplicaciones"
+                >
+                  ⚡ COBRAR SALDO DE APPS
+                </button>
+              )}
             </p>
           </div>
         </div>
@@ -214,15 +234,35 @@ export const AccountsPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    <span
-                      className={`badge-pixel text-[9px] px-2 py-0.5 ${
-                        isLiquid
-                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
-                          : 'bg-amber-950/80 text-amber-300 border-amber-800'
-                      }`}
-                    >
-                      {isLiquid ? 'LÍQUIDO DISPONIBLE' : 'POR COBRAR'}
-                    </span>
+                    {acc.kind === 'platform_receivable' ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          sound.playClick()
+                          triggerButtonSparks(e, 'amber', 14)
+                          openQuickModal('loan_repayment', null, {
+                            collectionSource: 'platform',
+                            fromAccountId: acc.id,
+                            description: `Cobro en efectivo pedido ${acc.name}`,
+                            isMoto: true,
+                          })
+                        }}
+                        className="badge-pixel text-[9px] px-2 py-0.5 bg-amber-950/90 text-amber-300 border-amber-600 hover:bg-amber-900 cursor-pointer transition-colors"
+                        title="Haz clic para cobrar pedidos en efectivo o liquidar saldo"
+                      >
+                        POR COBRAR ⚡
+                      </button>
+                    ) : (
+                      <span
+                        className={`badge-pixel text-[9px] px-2 py-0.5 ${
+                          isLiquid
+                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                            : 'bg-amber-950/80 text-amber-300 border-amber-800'
+                        }`}
+                      >
+                        {isLiquid ? 'LÍQUIDO DISPONIBLE' : 'POR COBRAR'}
+                      </span>
+                    )}
                     <button
                       onClick={() => handleOpenEdit(acc)}
                       className="p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-[#132620] transition-colors cursor-pointer"
@@ -244,19 +284,61 @@ export const AccountsPage: React.FC = () => {
 
                 <div className="bg-[#0b1311] border border-[#1e342c] p-3 rounded">
                   <span className="text-[10px] text-slate-400 font-pixel uppercase tracking-wider block">
-                    SALDO DISPONIBLE EN BÓVEDA
+                    {acc.kind === 'platform_receivable'
+                      ? 'SALDO PENDIENTE POR COBRAR (APP)'
+                      : 'SALDO DISPONIBLE EN BÓVEDA'}
                   </span>
                   <div
                     className={`font-pixel font-bold num text-2xl tracking-tight mt-0.5 ${
-                      balance >= 0 ? 'text-slate-100' : 'text-rose-400'
+                      acc.kind === 'platform_receivable'
+                        ? 'text-amber-300'
+                        : balance >= 0
+                        ? 'text-slate-100'
+                        : 'text-rose-400'
                     }`}
                   >
                     {formatCOP(balance)}
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                    Apertura: {formatCOP(acc.openingBalance)} ({formatShortDate(acc.openingDate, true)})
+                    {acc.kind === 'platform_receivable'
+                      ? 'Saldo retenido: cobros de pedidos en efectivo o dispersión semanal'
+                      : `Apertura: ${formatCOP(acc.openingBalance)} (${formatShortDate(acc.openingDate, true)})`}
                   </p>
                 </div>
+
+                {/* Botón directo de acción para cobrar o transferir */}
+                {acc.kind === 'platform_receivable' ? (
+                  <button
+                    onClick={(e) => {
+                      sound.playClick()
+                      triggerButtonSparks(e, 'amber', 14)
+                      openQuickModal('loan_repayment', null, {
+                        collectionSource: 'platform',
+                        fromAccountId: acc.id,
+                        description: `Cobro en efectivo pedido ${acc.name}`,
+                        isMoto: true,
+                      })
+                    }}
+                    className="w-full mt-2.5 btn-game btn-game-primary text-xs py-2 px-3 font-pixel flex items-center justify-center gap-1.5 cursor-pointer shadow-md border-2 border-amber-600 bg-gradient-to-r from-[#2c170a] to-[#1a1007] text-amber-300 hover:text-white"
+                  >
+                    <PixelSprite name="ledger_check" size={14} />
+                    <span>+ COBRAR A EFECTIVO / BANCO</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      sound.playClick()
+                      triggerButtonSparks(e, 'cyan', 12)
+                      openQuickModal('transfer', null, {
+                        fromAccountId: acc.id,
+                      })
+                    }}
+                    className="w-full mt-2.5 btn-game btn-game-secondary text-[11px] py-1.5 px-3 font-pixel flex items-center justify-center gap-1.5 cursor-pointer text-slate-300 hover:text-cyan-300"
+                  >
+                    <PixelSprite name="conveyor" size={13} />
+                    <span>TRANSFERIR DESDE AQUÍ</span>
+                  </button>
+                )}
               </div>
 
               {/* Movimientos recientes de la cuenta */}
