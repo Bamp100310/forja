@@ -228,6 +228,8 @@ Comando ejecutado: `npx vitest run --reporter=verbose`
     * *Motivo:* Configuración de ruta base `/forja/` para GitHub Pages, división de chunks Rollup (charts y supabase) y ampliación de Workbox `globPatterns` a fuentes `.woff` y assets gráficos `.webp`.
 18. `.github/workflows/deploy.yml`:
     * *Motivo:* Automatización del pipeline de CI/CD para GitHub Pages con ejecución de `vitest`, verificación de `eslint` y compilación de producción con variables de Supabase validadas.
+19. `src/services/api.ts`, `src/context/ForjaContext.tsx`, `src/components/forms/QuickTransactionModal.tsx`:
+    * *Motivo:* Subsanar error `duplicate key value violates unique constraint "transactions_pkey"` al editar movimientos en Supabase. Se preserva el `client_request_id` original al guardar modificaciones y se incorpora un mecanismo de fallback resiliente con actualización directa de cabecera y reemplazo de asientos balanceados en caso de que la función remota `save_transaction_atomic` aún no cuente con la migración 20261013000000.
 
 ---
 
