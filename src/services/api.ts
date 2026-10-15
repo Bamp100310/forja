@@ -32,6 +32,7 @@ import type {
 } from '../domain/types'
 import { WORKSHOP_PRESET_MODULES } from '../domain/modules'
 import type { TransactionDraft } from '../domain/ledger/operations'
+import { generateUUID } from '../domain/uuid'
 
 const LOCAL_STORAGE_KEY = 'forja_persistence_v2'
 
@@ -296,8 +297,8 @@ export const forjaApi = {
   },
 
   async saveAccount(account: Omit<Account, 'id'> & { id?: string }): Promise<string> {
+    const id = account.id || generateUUID()
     if (isUsingDemoMode() || !supabase) {
-      const id = account.id || `acc-${Date.now()}`
       const existingIdx = inMemoryStore.accounts.findIndex((a) => a.id === id)
       const item: Account = { ...account, id }
       if (existingIdx >= 0) inMemoryStore.accounts[existingIdx] = item
@@ -308,7 +309,7 @@ export const forjaApi = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('No autenticado')
     const payload = {
-      ...(account.id ? { id: account.id } : {}),
+      id,
       user_id: user.id,
       name: account.name,
       kind: account.kind,
@@ -319,7 +320,7 @@ export const forjaApi = {
       notes: account.notes,
       sort_order: account.sortOrder,
     }
-    const { data, error } = await supabase.from('accounts').upsert(payload).select('id').single()
+    const { data, error } = await supabase.from('accounts').upsert(payload, { onConflict: 'id' }).select('id').single()
     if (error) throw error
     return data.id
   },
@@ -465,8 +466,8 @@ export const forjaApi = {
   },
 
   async saveDebt(debt: Omit<Debt, 'id'> & { id?: string }): Promise<string> {
+    const id = debt.id || generateUUID()
     if (isUsingDemoMode() || !supabase) {
-      const id = debt.id || `debt-${Date.now()}`
       const existingIdx = inMemoryStore.debts.findIndex((d) => d.id === id)
       const item: Debt = { ...debt, id }
       if (existingIdx >= 0) inMemoryStore.debts[existingIdx] = item
@@ -477,7 +478,7 @@ export const forjaApi = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('No autenticado')
     const payload = {
-      ...(debt.id ? { id: debt.id } : {}),
+      id,
       user_id: user.id,
       name: debt.name,
       kind: debt.kind,
@@ -493,7 +494,7 @@ export const forjaApi = {
       status: debt.status,
       notes: debt.notes,
     }
-    const { data, error } = await supabase.from('debts').upsert(payload).select('id').single()
+    const { data, error } = await supabase.from('debts').upsert(payload, { onConflict: 'id' }).select('id').single()
     if (error) throw error
     return data.id
   },
@@ -530,8 +531,8 @@ export const forjaApi = {
   },
 
   async saveLoan(loan: Omit<Loan, 'id'> & { id?: string }): Promise<string> {
+    const id = loan.id || generateUUID()
     if (isUsingDemoMode() || !supabase) {
-      const id = loan.id || `loan-${Date.now()}`
       const existingIdx = inMemoryStore.loans.findIndex((l) => l.id === id)
       const item: Loan = { ...loan, id }
       if (existingIdx >= 0) inMemoryStore.loans[existingIdx] = item
@@ -542,7 +543,7 @@ export const forjaApi = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('No autenticado')
     const payload = {
-      ...(loan.id ? { id: loan.id } : {}),
+      id,
       user_id: user.id,
       person_name: loan.personName,
       start_date: loan.startDate,
@@ -551,7 +552,7 @@ export const forjaApi = {
       is_archived: loan.isArchived,
       notes: loan.notes,
     }
-    const { data, error } = await supabase.from('loans').upsert(payload).select('id').single()
+    const { data, error } = await supabase.from('loans').upsert(payload, { onConflict: 'id' }).select('id').single()
     if (error) throw error
     return data.id
   },

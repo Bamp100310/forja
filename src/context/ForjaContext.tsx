@@ -12,6 +12,7 @@ import {
 } from '../domain/ledger/aggregate'
 import { forjaApi } from '../services/api'
 import { isSupabaseConfigured, supabase } from '../services/supabase'
+import { AuthContext } from './AuthContext'
 import type {
   Account,
   Budget,
@@ -144,10 +145,26 @@ export const ForjaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [period, setPeriod] = useState<CutPeriod>(() => getCurrentPeriod())
   const today = useMemo(() => todayInBogota(), [])
 
+  const auth = useContext(AuthContext)
+  const authUser = auth?.user
+
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => forjaApi.isDemo())
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
+    if (auth?.user) {
+      return auth.user.id === '00000000-0000-0000-0000-000000000000' || !isSupabaseConfigured
+    }
+    return forjaApi.isDemo()
+  })
+
+  useEffect(() => {
+    if (authUser) {
+      const isDemo = authUser.id === '00000000-0000-0000-0000-000000000000' || !isSupabaseConfigured
+      forjaApi.setDemoMode(isDemo)
+      setIsDemoMode(isDemo)
+    }
+  }, [authUser])
 
   const [profile, setProfile] = useState<Profile | null>(null)
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_USER_PREFERENCES)

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, isSupabaseConfigured } from '../services/supabase'
+import { forjaApi } from '../services/api'
 
 interface AuthContextType {
   user: User | null
@@ -12,7 +13,7 @@ interface AuthContextType {
   enterDemoMode: () => void
 }
 
-const AuthContext = createContext<AuthContextType | null>(null)
+export const AuthContext = createContext<AuthContextType | null>(null)
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
@@ -42,6 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(initialSession)
       setUser(initialSession?.user ?? null)
       if (initialSession?.user) {
+        forjaApi.setDemoMode(false)
         setupUser()
       }
       setLoading(false)
@@ -53,6 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(currentSession)
       setUser(currentSession?.user ?? null)
       if (currentSession?.user) {
+        forjaApi.setDemoMode(false)
         setupUser()
       }
       setLoading(false)
@@ -72,6 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })
     if (error) throw error
     if (data.user) {
+      forjaApi.setDemoMode(false)
       setUser(data.user)
       setSession(data.session)
       await setupUser()
@@ -87,6 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString(),
       email: 'operario@forja.test',
     }
+    forjaApi.setDemoMode(true)
     setUser(demoUser)
   }, [])
 
@@ -98,6 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // ignore
       }
     }
+    forjaApi.setDemoMode(!isSupabaseConfigured)
     setUser(null)
     setSession(null)
   }, [])
