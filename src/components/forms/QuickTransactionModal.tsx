@@ -951,7 +951,7 @@ export const QuickTransactionModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-3">
                   <div>
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                       CATEGORÍA / FUENTE
@@ -1215,7 +1215,7 @@ export const QuickTransactionModal: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-3">
                       <div>
                         <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                           OBLIGACIÓN / PASIVO A ABONAR
