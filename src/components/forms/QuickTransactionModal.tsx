@@ -47,6 +47,7 @@ export const QuickTransactionModal: React.FC = () => {
     quickModalPrefill,
     closeQuickModal,
     saveTransaction,
+    saveLoan,
     today,
     categories,
     accounts,
@@ -562,24 +563,35 @@ export const QuickTransactionModal: React.FC = () => {
         }
 
         if (debtFundingSource === 'loan') {
-          if (!fromLoanId) {
-            throw new Error('Selecciona el préstamo a favor con el que realizas la compensación o cruce.')
+          let resolvedFromLoanId = fromLoanId
+          if (!resolvedFromLoanId || resolvedFromLoanId === '__new__') {
+            if (!loanPersonName.trim()) {
+              throw new Error('Ingresa el nombre de la persona con quien cruzas la deuda (ej. Jhonatan).')
+            }
+            resolvedFromLoanId = await saveLoan({
+              personName: loanPersonName.trim(),
+              startDate: date,
+              dueDate: loanDueDate || null,
+              interestNote: null,
+              isArchived: false,
+              notes: `Creado para cruzar con deuda ${debts.find((x) => x.id === debtId)?.name || ''}`,
+            })
           }
           if (principal <= 0) {
-            throw new Error('Ingresa el monto del préstamo a abonar a la deuda.')
+            throw new Error('Ingresa el monto del abono o compensación a cruzar con la deuda.')
           }
           const d = debts.find((x) => x.id === debtId)
-          const l = loans.find((x) => x.id === fromLoanId)
+          const l = loans.find((x) => x.id === resolvedFromLoanId) || { personName: loanPersonName }
           op = {
             kind: 'debt_payment',
             date,
             description:
               description.trim() ||
-              `Cruce: Abono a ${d?.name || 'deuda'} con préstamo de ${l?.personName || 'deudor'}`,
+              `Cruce: Abono a ${d?.name || 'deuda'} con compensación de ${l?.personName || 'deudor'}`,
             notes: notes.trim() || null,
             debtId,
             accountId: null,
-            fromLoanId,
+            fromLoanId: resolvedFromLoanId,
             principal,
             interest: interest > 0 ? interest : undefined,
             fees: debtFees > 0 ? debtFees : undefined,
@@ -1237,24 +1249,23 @@ export const QuickTransactionModal: React.FC = () => {
                             >
                               Bóveda
                             </button>
-                            {loans.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDebtFundingSource('loan')
-                                  if (!fromLoanId && loans.length > 0) setFromLoanId(loans[0].id)
-                                }}
-                                className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors flex items-center gap-1 cursor-pointer ${
-                                  debtFundingSource === 'loan'
-                                    ? 'bg-[#261730] text-purple-300 border border-purple-600 font-bold'
-                                    : 'text-slate-400 hover:text-purple-300'
-                                }`}
-                                title="Compensar contra dinero que te deben (Cruce de cuentas)"
-                              >
-                                <Handshake size={10} />
-                                Cruzar préstamo ({loans.length})
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDebtFundingSource('loan')
+                                if (!fromLoanId && loans.length > 0) setFromLoanId(loans[0].id)
+                                else if (!fromLoanId) setFromLoanId('__new__')
+                              }}
+                              className={`text-[10px] font-pixel px-1.5 py-0.5 rounded-xs transition-colors flex items-center gap-1 cursor-pointer ${
+                                debtFundingSource === 'loan'
+                                  ? 'bg-[#261730] text-purple-300 border border-purple-600 font-bold'
+                                  : 'text-slate-400 hover:text-purple-300'
+                              }`}
+                              title="Compensar contra dinero o gastos pagados por esa persona"
+                            >
+                              <Handshake size={10} />
+                              Cruzar compensación / persona {loans.length > 0 ? `(${loans.length})` : ''}
+                            </button>
                           </div>
                         </div>
 
@@ -1272,18 +1283,37 @@ export const QuickTransactionModal: React.FC = () => {
                             ))}
                           </select>
                         ) : (
-                          <select
-                            value={fromLoanId}
-                            onChange={(e) => setFromLoanId(e.target.value)}
-                            required
-                            className="w-full bg-[#0f0914] border border-purple-700 rounded-xs p-2 text-xs font-pixel text-purple-200 focus:outline-none focus:border-purple-400"
-                          >
-                            {loans.map((l) => (
-                              <option key={l.id} value={l.id}>
-                                {l.personName} (Por cobrar: {formatCOP(balances.loanPending.get(l.id) || 0)})
-                              </option>
-                            ))}
-                          </select>
+                          <div className="space-y-1.5">
+                            <select
+                              value={fromLoanId}
+                              onChange={(e) => {
+                                setFromLoanId(e.target.value)
+                                if (e.target.value !== '__new__') {
+                                  const l = loans.find((item) => item.id === e.target.value)
+                                  if (l) setLoanPersonName(l.personName)
+                                }
+                              }}
+                              required
+                              className="w-full bg-[#0f0914] border border-purple-700 rounded-xs p-2 text-xs font-pixel text-purple-200 focus:outline-none focus:border-purple-400"
+                            >
+                              {loans.map((l) => (
+                                <option key={l.id} value={l.id}>
+                                  {l.personName} (Por cobrar: {formatCOP(balances.loanPending.get(l.id) || 0)})
+                                </option>
+                              ))}
+                              <option value="__new__">+ Nueva persona / compensación (ej. Jhonatan)</option>
+                            </select>
+                            {(fromLoanId === '__new__' || loans.length === 0) && (
+                              <input
+                                type="text"
+                                placeholder="Nombre de la persona (ej. Jhonatan)"
+                                value={loanPersonName}
+                                onChange={(e) => setLoanPersonName(e.target.value)}
+                                required
+                                className="w-full bg-[#0f0914] border border-purple-700 rounded-xs p-2 text-xs font-pixel text-purple-200 placeholder:text-purple-400/50 focus:outline-none focus:border-purple-400"
+                              />
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
