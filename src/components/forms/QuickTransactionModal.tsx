@@ -1033,7 +1033,7 @@ export const QuickTransactionModal: React.FC = () => {
                   <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-3">
                   <div>
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                       CATEGORÍA
@@ -1086,32 +1086,34 @@ export const QuickTransactionModal: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      MEDIO DE PAGO
-                    </label>
-                    <div className="flex gap-2 mb-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('account')}
-                        className={`flex-1 py-1 text-xs font-pixel tracking-wider uppercase rounded-xs border transition-colors ${
-                          paymentMethod === 'account'
-                            ? 'btn-game btn-game-primary'
-                            : 'btn-game btn-game-secondary'
-                        }`}
-                      >
-                        CUENTA / EFECTIVO
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('debt')}
-                        className={`flex-1 py-1 text-xs font-pixel tracking-wider uppercase rounded-xs border transition-colors ${
-                          paymentMethod === 'debt'
-                            ? 'btn-game btn-game-primary'
-                            : 'btn-game btn-game-secondary'
-                        }`}
-                      >
-                        TARJETA CRÉDITO
-                      </button>
+                    <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                      <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                        MEDIO DE PAGO
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMethod('account')}
+                          className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                            paymentMethod === 'account'
+                              ? 'bg-[#1b2f27] text-emerald-300 border border-emerald-600 font-bold'
+                              : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
+                          }`}
+                        >
+                          Cuenta / Efectivo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMethod('debt')}
+                          className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                            paymentMethod === 'debt'
+                              ? 'bg-[#2a1d0b] text-amber-300 border border-amber-600 font-bold'
+                              : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
+                          }`}
+                        >
+                          Tarjeta Crédito
+                        </button>
+                      </div>
                     </div>
 
                     {paymentMethod === 'account' ? (
@@ -1123,7 +1125,7 @@ export const QuickTransactionModal: React.FC = () => {
                       >
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
-                            {a.name}
+                            {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Disponible'})
                           </option>
                         ))}
                       </select>
