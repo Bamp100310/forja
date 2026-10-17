@@ -338,18 +338,28 @@ export const RecurringPage: React.FC = () => {
       {/* MODAL NUEVA / EDITAR RECURRENCIA */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-sky-800/80 shadow-2xl">
-            <div className="flex items-center justify-between pb-2.5 mb-3 border-b-2 border-[#1c2d33]">
-              <div className="flex items-center gap-2">
-                <PixelSprite name="conveyor" size={20} />
-                <h3 className="font-stencil text-base text-sky-400 font-bold tracking-wide">
-                  {editingRecurring ? 'MODIFICAR GASTO FIJO RECURRENTE' : 'PROGRAMAR CICLO RECURRENTE'}
-                </h3>
+          <div className="forge-modal-box rivet-corners max-w-xl w-full p-5 sm:p-6 border-2 border-sky-800/80 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b-2 border-[#1c2d33]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#0d1c24] border border-sky-700/60">
+                  <PixelSprite name="conveyor" size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-cyan" />
+                    <h3 className="font-stencil text-base text-sky-400 font-bold tracking-wide">
+                      {editingRecurring ? 'MODIFICAR GASTO FIJO RECURRENTE' : 'PROGRAMAR CICLO RECURRENTE'}
+                    </h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Estación de cobros cíclicos, facturas fijas y suscripciones
+                  </p>
+                </div>
               </div>
               <button
                 onClick={handleCloseModal}
                 disabled={isSubmitting}
-                className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#15252b] border border-transparent hover:border-[#25424d] transition-colors cursor-pointer"
+                className="p-1.5 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#15252b] border border-transparent hover:border-[#25424d] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -385,7 +395,7 @@ export const RecurringPage: React.FC = () => {
                 <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                   CUOTA PREVISTA (COP)
                 </label>
-                <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
+                <MoneyInput value={amount} onChange={setAmount} required placeholder="0" showQuickIngots={true} />
               </div>
 
               <div className="grid grid-cols-2 gap-2">

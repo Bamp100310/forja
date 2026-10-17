@@ -4,6 +4,7 @@ import { ForjaProvider } from './context/ForjaContext'
 import { AppLayout } from './components/layout/AppLayout'
 import { PixelSparks } from './components/common/PixelSparks'
 import { PixelSprite } from './components/common/PixelSprite'
+import { ForjaLogo } from './components/common/ForjaLogo'
 import { ModuleGuard } from './components/common/ModuleGuard'
 import { LoginPage } from './pages/LoginPage'
 import { ConfigErrorPage } from './pages/ConfigErrorPage'
@@ -24,11 +25,14 @@ function AuthenticatedApp() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0f0d] flex flex-col items-center justify-center text-slate-200">
-        <PixelSprite name="cog" size={44} className="animate-spin-slow" />
-        <p className="mt-4 font-stencil text-emerald-400 text-xs tracking-widest animate-pulse">
-          ENCENDIENDO LA MAQUINARIA DEL TALLER...
-        </p>
+      <div className="min-h-screen bg-[#090d0b] flex flex-col items-center justify-center p-4 text-slate-200 gap-4">
+        <ForjaLogo variant="compact" showSubtitle={false} />
+        <div className="flex items-center gap-2.5">
+          <PixelSprite name="cog" size={24} className="animate-spin-slow" />
+          <p className="font-stencil text-amber-300 text-xs tracking-widest animate-pulse">
+            ENCENDIENDO LA MAQUINARIA DE FORJA III...
+          </p>
+        </div>
       </div>
     )
   }

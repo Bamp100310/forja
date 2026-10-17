@@ -1,139 +1,196 @@
-import React from 'react'
-import { Link } from 'react-router-dom'
+import React, { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowRight, Plus } from 'lucide-react'
 import { useForja } from '../../context/ForjaContext'
 import { formatCOP } from '../../domain/money'
 import { formatShortDate } from '../../domain/dates'
 import { describeTransaction } from '../../domain/ledger/aggregate'
-import { isDateInPeriod } from '../../domain/period'
 import { PixelSprite } from '../common/PixelSprite'
 import { CategoryIcon, resolveCategoryColor } from '../common/CategoryIcon'
-import { EmptyState } from '../common/EmptyState'
-import { ArrowRight, Bike } from 'lucide-react'
-import type { TransactionKind } from '../../domain/types'
+import { sound } from '../../services/sound'
+import { triggerButtonSparks } from '../common/PixelSparks'
 
-const KIND_LABELS: Record<TransactionKind, { label: string; badgeClass: string; textClass: string }> = {
-  income: {
-    label: 'INGRESO',
-    badgeClass: 'bg-[#12261a] text-emerald-300 border-[#234b31]',
-    textClass: 'text-emerald-400 font-black',
-  },
-  expense: {
-    label: 'GASTO',
-    badgeClass: 'bg-[#2b140e] text-rose-300 border-[#5f2a1e]',
-    textClass: 'text-rose-400 font-black',
-  },
-  transfer: {
-    label: 'TRANSFERENCIA',
-    badgeClass: 'bg-[#0f2121] text-cyan-300 border-[#204443]',
-    textClass: 'text-cyan-300 font-bold',
-  },
-  debt_payment: {
-    label: 'PAGO DEUDA',
-    badgeClass: 'bg-[#2a1d0b] text-amber-300 border-[#5e4216]',
-    textClass: 'text-amber-300 font-black',
-  },
-  debt_charge: {
-    label: 'INTERÉS / CARGO',
-    badgeClass: 'bg-[#2b140e] text-rose-300 border-[#5f2a1e]',
-    textClass: 'text-rose-400 font-black',
-  },
-  debt_disbursement: {
-    label: 'DESEMBOLSO CRÉDITO',
-    badgeClass: 'bg-[#0f2121] text-cyan-300 border-[#204443]',
-    textClass: 'text-cyan-300 font-black',
-  },
-  loan_given: {
-    label: 'PRÉSTAMO',
-    badgeClass: 'bg-[#27150c] text-orange-300 border-[#582f19]',
-    textClass: 'text-orange-400 font-black',
-  },
-  loan_repayment: {
-    label: 'COBRO PRÉSTAMO',
-    badgeClass: 'bg-[#12261a] text-emerald-300 border-[#234b31]',
-    textClass: 'text-emerald-300 font-black',
-  },
-  adjustment: {
-    label: 'AJUSTE',
-    badgeClass: 'bg-slate-900 text-slate-300 border-slate-700',
-    textClass: 'text-slate-300 font-black',
-  },
-}
+type LogFilter = 'all' | 'income' | 'expense' | 'transfer'
 
 export const OperationalLogbook: React.FC = () => {
-  const { transactions, period, index, isModuleActive, openQuickModal, openTransactionDetail } = useForja()
-  const hasMoto = isModuleActive('moto')
+  const { transactions, index, openQuickModal, openTransactionDetail } = useForja()
+  const navigate = useNavigate()
+  const [activeFilter, setActiveFilter] = useState<LogFilter>('all')
 
-  // Movimientos recientes del corte
-  const periodTxs = transactions
-    .filter((tx) => isDateInPeriod(tx.date, period))
-    .slice(0, 6)
+  const recentTransactions = useMemo(() => {
+    const filtered =
+      activeFilter === 'all'
+        ? transactions
+        : transactions.filter((tx) => tx.kind === activeFilter)
+    return filtered.slice(0, 7)
+  }, [transactions, activeFilter])
+
+  const getKindTag = (kind: string) => {
+    switch (kind) {
+      case 'income':
+        return {
+          label: 'INGRESO',
+          classes: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/70',
+        }
+      case 'expense':
+        return {
+          label: 'GASTO',
+          classes: 'bg-rose-950/80 text-rose-300 border-rose-700/70',
+        }
+      case 'transfer':
+        return {
+          label: 'TRASLADO',
+          classes: 'bg-cyan-950/80 text-cyan-300 border-cyan-700/70',
+        }
+      case 'debt_payment':
+        return {
+          label: 'ABONO DEUDA',
+          classes: 'bg-amber-950/80 text-amber-300 border-amber-700/70',
+        }
+      case 'loan_given':
+        return {
+          label: 'PRÉSTAMO',
+          classes: 'bg-purple-950/80 text-purple-300 border-purple-700/70',
+        }
+      case 'loan_repayment':
+        return {
+          label: 'COBRO',
+          classes: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/70',
+        }
+      default:
+        return {
+          label: 'ASIENTO',
+          classes: 'bg-slate-900 text-slate-300 border-slate-700',
+        }
+    }
+  }
 
   return (
-    <div className="forge-panel p-4 sm:p-5 rivet-corners border-[#28443b] bg-[#121c19]">
-      {/* Encabezado */}
-      <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#213730]">
+    <section
+      aria-label="Bitácora reciente de operaciones asentadas"
+      className="h-full forge-machine-panel rivet-corners p-4 sm:p-5 flex flex-col justify-between space-y-4"
+    >
+      {/* Cabecera de Bitácora con Pestañas de Filtrado Táctil */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#213731]">
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-sm bg-[#162721] border border-emerald-700/50 shadow-inner">
-            <PixelSprite name="ledger" size={22} />
+          <div className="p-1.5 rounded-xs bg-[#11201b] border border-emerald-800/70">
+            <PixelSprite name="ledger" size={18} />
           </div>
           <div>
-            <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
-              {hasMoto ? 'BITÁCORA DE OPERACIONES DEL TALLER' : 'BITÁCORA DE MOVIMIENTOS RECIENTES'}
-            </h3>
-            <p className="text-[11px] text-slate-400 font-pixel">
-              Registro secuencial de movimientos con partida doble en el corte {period.label}
+            <div className="flex items-center gap-2">
+              <span className="led-pilot led-pilot-online" />
+              <h2 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wider">
+                BITÁCORA OPERATIVA DE ASIENTOS RECIENTES
+              </h2>
+            </div>
+            <p className="text-[11px] text-slate-400 font-pixel mt-0.5">
+              Últimos movimientos registrados en partida doble (pulsa una fila para auditar sus asientos)
             </p>
           </div>
         </div>
 
-        <Link
-          to="/movimientos"
-          className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition-colors font-pixel"
-        >
-          <span>Ver Libro Completo</span>
-          <ArrowRight size={13} />
-        </Link>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { id: 'all', label: 'TODOS' },
+              { id: 'income', label: 'INGRESOS' },
+              { id: 'expense', label: 'GASTOS' },
+              { id: 'transfer', label: 'TRASLADOS' },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                sound.playClick()
+                setActiveFilter(tab.id)
+              }}
+              className={`px-2.5 py-1 rounded-xs text-[10px] font-stencil transition-colors cursor-pointer border ${
+                activeFilter === tab.id
+                  ? 'bg-[#23180c] text-amber-300 border-amber-500 font-bold'
+                  : 'bg-[#09100e] text-slate-400 border-[#1d3129] hover:text-slate-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => {
+              sound.playClick()
+              navigate('/movimientos')
+            }}
+            className="ml-1 btn-game btn-game-secondary text-[10px] py-1 px-2.5 font-pixel text-emerald-300 flex items-center gap-1 cursor-pointer"
+          >
+            <span>HISTORIAL</span>
+            <ArrowRight size={11} />
+          </button>
+        </div>
       </div>
 
-      {/* Lista de movimientos estilo registro de taller */}
-      {periodTxs.length === 0 ? (
-        <EmptyState
-          sprite="empty_bench"
-          title="Bitácora en Blanco para este Ciclo"
-          description={`No hay movimientos asentados todavía para el corte ${period.label}. Registra tus primeros ingresos, gastos o compras de hoy.`}
-          actionLabel="+ Forjar Primer Movimiento"
-          onAction={() => openQuickModal()}
-        />
+      {/* Lista de Movimientos en Placas Industriales */}
+      {recentTransactions.length === 0 ? (
+        <div className="p-6 rounded-xs bg-[#09100e] border border-[#1d3129] text-center space-y-2.5">
+          <PixelSprite name="empty_bench" size={28} className="mx-auto" />
+          <p className="text-xs font-pixel font-bold text-slate-200">
+            NO HAY ASIENTOS REGISTRADOS EN ESTA VISTA
+          </p>
+          <p className="text-[11px] font-pixel text-slate-400 max-w-md mx-auto">
+            Usa el botón «Forjar Movimiento» para asentar un nuevo ingreso, gasto o transferencia en tu libro contable.
+          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              sound.playClick()
+              triggerButtonSparks(e, 'forge', 16)
+              openQuickModal()
+            }}
+            className="btn-game btn-game-primary text-xs py-1.5 px-3.5 font-pixel font-bold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus size={14} />
+            <span>FORJAR PRIMER MOVIMIENTO</span>
+          </button>
+        </div>
       ) : (
-        <div className="space-y-2">
-          {periodTxs.map((tx) => {
+        <div className="divide-y divide-[#1a2d26] bg-[#09100d] border border-[#1f342c] rounded-xs overflow-hidden">
+          {recentTransactions.map((tx) => {
             const desc = describeTransaction(tx, index)
-            const meta = KIND_LABELS[tx.kind] || KIND_LABELS.expense
-            const cat = desc.categoryId ? index.categories.get(desc.categoryId) : undefined
-            const itemColor = cat?.color || resolveCategoryColor(cat?.icon, cat?.name || tx.description, tx.kind, tx.isMoto)
+            const cat = desc.categoryId ? index.categories.get(desc.categoryId) : null
+            const itemColor =
+              cat?.color ||
+              resolveCategoryColor(
+                cat?.icon,
+                cat?.name || tx.description,
+                tx.kind,
+                tx.isMoto,
+              )
+            const tag = getKindTag(tx.kind)
 
             return (
               <div
                 key={tx.id}
-                onClick={() => openTransactionDetail(tx)}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  sound.playClick()
+                  openTransactionDetail(tx)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
+                    sound.playClick()
                     openTransactionDetail(tx)
                   }
                 }}
-                role="button"
-                tabIndex={0}
-                title="Inspeccionar detalle y asientos contables"
-                className="bg-[#0f1715] hover:bg-[#152722] border border-[#213730] hover:border-emerald-600/50 p-2.5 sm:p-3 transition-all flex items-center justify-between gap-3 shadow-xs cursor-pointer group rounded-xs"
+                className="p-3 hover:bg-[#11201a] transition-colors flex items-center justify-between gap-3 cursor-pointer group"
               >
-                {/* Lado izquierdo: Icono de categoría dinámico + Detalles */}
                 <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className="w-8 h-8 rounded-xs border flex items-center justify-center shrink-0 shadow-inner"
+                    className="w-8 h-8 rounded-xs border flex items-center justify-center shrink-0"
                     style={{
-                      borderColor: `${itemColor}50`,
-                      backgroundColor: `${itemColor}18`,
+                      borderColor: `${itemColor}55`,
+                      backgroundColor: `${itemColor}15`,
                     }}
                   >
                     <CategoryIcon
@@ -141,39 +198,59 @@ export const OperationalLogbook: React.FC = () => {
                       categoryName={cat?.name || tx.description}
                       kind={tx.kind}
                       isMoto={tx.isMoto}
-                      size={18}
+                      size={16}
                       color={itemColor}
                     />
                   </div>
 
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-200 text-xs sm:text-sm truncate font-pixel">
+                      <span className="font-pixel text-xs font-bold text-slate-100 group-hover:text-amber-300 truncate transition-colors">
                         {tx.description}
                       </span>
+                      <span className={`badge-pixel text-[8px] px-1.5 py-0.5 ${tag.classes}`}>
+                        {tag.label}
+                      </span>
                       {tx.isMoto && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-xs bg-[#2a1d0b] border border-[#5e4216] text-[9px] text-amber-300 font-stencil">
-                          <Bike size={10} />
+                        <span className="badge-pixel text-[8px] px-1.5 py-0.5 bg-amber-950/80 text-amber-300 border-amber-700/70">
                           MOTO
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 font-pixel">
-                      <span>{formatShortDate(tx.date)}</span>
-                      <span>•</span>
-                      <span className="truncate">{desc.sourceLabel || 'Operación de taller'}</span>
+                    <div className="text-[11px] text-slate-400 font-pixel flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="font-mono num text-slate-400">
+                        {formatShortDate(tx.date, true)}
+                      </span>
+                      {desc.sourceLabel && (
+                        <>
+                          <span>•</span>
+                          <span className="text-slate-300 truncate">{desc.sourceLabel}</span>
+                        </>
+                      )}
+                      {cat && (
+                        <>
+                          <span>•</span>
+                          <span className="text-emerald-400/90 truncate">{cat.name}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* Lado derecho: Importe y Badge */}
                 <div className="text-right shrink-0">
-                  <div className={`font-pixel text-sm sm:text-base ${meta.textClass}`}>
-                    {tx.kind === 'income' || tx.kind === 'loan_repayment' ? '+' : '−'}{' '}
+                  <span
+                    className={`text-sm sm:text-base font-bold num tracking-tight ${
+                      desc.tone === 'income'
+                        ? 'text-emerald-400'
+                        : desc.tone === 'expense'
+                          ? 'text-rose-400'
+                          : desc.tone === 'debt'
+                            ? 'text-amber-300'
+                            : 'text-cyan-300'
+                    }`}
+                  >
+                    {desc.tone === 'income' ? '+' : desc.tone === 'expense' ? '−' : ''}
                     {formatCOP(desc.amount)}
-                  </div>
-                  <span className={`badge-pixel text-[9px] mt-0.5 ${meta.badgeClass}`}>
-                    {meta.label}
                   </span>
                 </div>
               </div>
@@ -181,6 +258,6 @@ export const OperationalLogbook: React.FC = () => {
           })}
         </div>
       )}
-    </div>
+    </section>
   )
 }

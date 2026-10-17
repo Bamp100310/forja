@@ -153,7 +153,7 @@ export const LoginPage: React.FC = () => {
 
         {/* Pie de página con versión */}
         <div className="mt-4 text-center text-[10px] text-slate-400 font-stencil tracking-wider">
-          FORJA v2.0 • TERMINAL DE PRODUCCIÓN SUPABASE
+          FORJA III • TERMINAL DE PRODUCCIÓN SUPABASE
         </div>
       </div>
     </div>

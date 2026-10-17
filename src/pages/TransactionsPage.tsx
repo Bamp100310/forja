@@ -20,7 +20,10 @@ export const TransactionsPage: React.FC = () => {
     deleteTransaction,
     openQuickModal,
     openTransactionDetail,
+    isModuleActive,
   } = useForja()
+
+  const isMotoModuleEnabled = isModuleActive('moto')
 
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCutOnly, setFilterCutOnly] = useState(true)
@@ -94,7 +97,7 @@ export const TransactionsPage: React.FC = () => {
             <p className="text-xs text-slate-400 mt-0.5">
               {filterCutOnly ? `Bitácora activa del corte ${period.label}` : 'Historial contable completo del taller'}
               {' • '}
-              <span className="text-emerald-400 font-mono font-medium">{filteredTransactions.length}</span> registros filtrados
+              <span className="text-emerald-400 font-mono num font-bold">{filteredTransactions.length}</span> registros filtrados
             </p>
           </div>
         </div>
@@ -124,7 +127,7 @@ export const TransactionsPage: React.FC = () => {
 
       {/* Controles de filtro y búsqueda */}
       <div className="forge-machine-panel p-3.5 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[220px]">
+        <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
@@ -140,6 +143,7 @@ export const TransactionsPage: React.FC = () => {
           <select
             value={filterKind}
             onChange={(e) => setFilterKind(e.target.value)}
+            aria-label="Filtrar por tipo de movimiento"
             className="bg-[#0d1614] border border-[#213731] rounded px-3 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-500 text-xs"
           >
             <option value="all">TODOS LOS TIPOS</option>
@@ -166,25 +170,27 @@ export const TransactionsPage: React.FC = () => {
             {filterCutOnly ? `CORTE: ${period.id}` : 'HISTORIAL COMPLETO'}
           </button>
 
-          {/* Toggle Solo moto */}
-          <button
-            onClick={() => {
-              sound.playClick()
-              setFilterMotoOnly(!filterMotoOnly)
-            }}
-            className={`btn-game text-xs py-1.5 px-3 flex items-center gap-1.5 font-pixel tracking-wider cursor-pointer ${
-              filterMotoOnly
-                ? 'btn-game-orange'
-                : 'btn-game-secondary'
-            }`}
-          >
-            <PixelSprite name="moto" size={14} />
-            <span>SOLO MOTO</span>
-          </button>
+          {/* Toggle Solo moto (solo visible cuando el módulo moto está activo) */}
+          {isMotoModuleEnabled && (
+            <button
+              onClick={() => {
+                sound.playClick()
+                setFilterMotoOnly(!filterMotoOnly)
+              }}
+              className={`btn-game text-xs py-1.5 px-3 flex items-center gap-1.5 font-pixel tracking-wider cursor-pointer ${
+                filterMotoOnly
+                  ? 'btn-game-orange'
+                  : 'btn-game-secondary'
+              }`}
+            >
+              <PixelSprite name="moto" size={14} />
+              <span>SOLO MOTO</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Tabla de movimientos */}
+      {/* Lista / Tabla de movimientos */}
       <div className="forge-machine-panel rivet-corners overflow-hidden">
         {filteredTransactions.length === 0 ? (
           <div className="p-4">
@@ -197,87 +203,64 @@ export const TransactionsPage: React.FC = () => {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#0b1311] text-slate-400 uppercase tracking-wider text-[10px] border-b border-[#213731]">
-                <tr>
-                  <th className="py-2.5 px-3 font-pixel">FECHA</th>
-                  <th className="py-2.5 px-3 font-pixel">OPERACIÓN</th>
-                  <th className="py-2.5 px-3 font-pixel">CATEGORÍA</th>
-                  <th className="py-2.5 px-3 font-pixel">CUENTA / BÓVEDA</th>
-                  <th className="py-2.5 px-3 text-right font-pixel">IMPORTE</th>
-                  <th className="py-2.5 px-3 text-center font-pixel">ACCIÓN</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#182622]">
-                {filteredTransactions.map((tx) => {
-                  const desc = describeTransaction(tx, index)
-                  const cat = desc.categoryId ? index.categories.get(desc.categoryId) : null
+          <>
+            {/* VISTA MOBILE-FIRST (PLACAS TÁCTILES DE BITÁCORA < MD) */}
+            <div className="md:hidden divide-y divide-[#182622]">
+              {filteredTransactions.map((tx) => {
+                const desc = describeTransaction(tx, index)
+                const cat = desc.categoryId ? index.categories.get(desc.categoryId) : null
+                const itemColor =
+                  cat?.color ||
+                  resolveCategoryColor(
+                    cat?.icon,
+                    cat?.name || tx.description,
+                    tx.kind,
+                    tx.isMoto,
+                  )
 
-                  return (
-                    <tr
-                      key={tx.id}
-                      onClick={() => openTransactionDetail(tx)}
-                      className="hover:bg-[#132420] transition-colors cursor-pointer group"
-                    >
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-slate-400 text-xs">
-                        {formatShortDate(tx.date, true)}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {(() => {
-                          const itemColor = cat?.color || resolveCategoryColor(cat?.icon, cat?.name || tx.description, tx.kind, tx.isMoto)
-                          return (
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="p-1 rounded bg-[#0d1614] border shrink-0 group-hover:border-emerald-600/50 flex items-center justify-center w-7 h-7"
-                                style={{ borderColor: `${itemColor}50`, backgroundColor: `${itemColor}15` }}
-                              >
-                                <CategoryIcon
-                                  icon={cat?.icon}
-                                  categoryName={cat?.name || tx.description}
-                                  kind={tx.kind}
-                                  isMoto={tx.isMoto}
-                                  size={16}
-                                  color={itemColor}
-                                />
-                              </div>
-                              <div>
-                                <span className="font-medium text-slate-100 text-xs group-hover:text-emerald-300 transition-colors">{tx.description}</span>
-                                {tx.notes && (
-                                  <p className="text-[11px] text-slate-500 italic mt-0.5">{tx.notes}</p>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })()}
-                      </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap text-slate-300 text-xs">
-                        {cat ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px]"
-                            style={{
-                              borderColor: `${cat.color}50`,
-                              backgroundColor: `${cat.color}15`,
-                              color: cat.color || '#6ee7b7',
-                            }}
-                          >
-                            <CategoryIcon icon={cat.icon} categoryName={cat.name} size={12} color={cat.color} />
-                            {cat.name}
+                return (
+                  <div
+                    key={tx.id}
+                    onClick={() => openTransactionDetail(tx)}
+                    className="p-3.5 hover:bg-[#132420] active:bg-[#172d27] transition-colors cursor-pointer space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <div
+                          className="p-1.5 rounded bg-[#0d1614] border shrink-0 flex items-center justify-center w-8 h-8 mt-0.5"
+                          style={{
+                            borderColor: `${itemColor}50`,
+                            backgroundColor: `${itemColor}15`,
+                          }}
+                        >
+                          <CategoryIcon
+                            icon={cat?.icon}
+                            categoryName={cat?.name || tx.description}
+                            kind={tx.kind}
+                            isMoto={tx.isMoto}
+                            size={16}
+                            color={itemColor}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="font-pixel font-bold text-slate-100 text-xs block truncate">
+                            {tx.description}
                           </span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap text-slate-400 text-xs">
-                        {desc.sourceLabel ? (
-                          <span className="font-mono text-slate-300">{desc.sourceLabel}</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[11px] font-mono text-slate-400">
+                            <span className="num">{formatShortDate(tx.date, true)}</span>
+                            {desc.sourceLabel && (
+                              <>
+                                <span>•</span>
+                                <span className="text-slate-300 truncate">{desc.sourceLabel}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
                         <span
-                          className={`font-pixel font-bold num text-sm tracking-tight ${
+                          className={`font-pixel font-bold num text-sm tracking-tight block ${
                             desc.tone === 'income'
                               ? 'text-emerald-400'
                               : desc.tone === 'expense'
@@ -292,39 +275,188 @@ export const TransactionsPage: React.FC = () => {
                           {desc.tone === 'income' ? '+' : desc.tone === 'expense' ? '−' : ''}
                           {formatCOP(desc.amount)}
                         </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openTransactionDetail(tx)
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#14221e]">
+                      <div>
+                        {cat ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-pixel"
+                            style={{
+                              borderColor: `${cat.color}50`,
+                              backgroundColor: `${cat.color}15`,
+                              color: cat.color || '#6ee7b7',
                             }}
-                            className="p-1.5 rounded text-slate-400 hover:text-emerald-300 hover:bg-[#152e25] transition-colors cursor-pointer"
-                            title="Ver detalle y asientos"
-                            aria-label="Ver detalle"
                           >
-                            <Eye size={13} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleOpenDelete(tx.id, tx.description)
-                            }}
-                            className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                            title="Eliminar movimiento"
-                            aria-label="Eliminar"
+                            <CategoryIcon icon={cat.icon} categoryName={cat.name} size={11} color={cat.color} />
+                            {cat.name}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-pixel">Asiento interno</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openTransactionDetail(tx)
+                          }}
+                          className="px-2 py-1 rounded bg-[#101e19] border border-[#233d33] text-[10px] font-pixel text-slate-300 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye size={12} />
+                          <span>AUDITAR</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleOpenDelete(tx.id, tx.description)
+                          }}
+                          className="p-1 rounded bg-[#1a1111] border border-rose-900/50 text-slate-400 hover:text-rose-400 cursor-pointer"
+                          aria-label="Eliminar movimiento"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* VISTA DE ESCRITORIO (TABLA CONTABLE >= MD) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#0b1311] text-slate-400 uppercase tracking-wider text-[10px] border-b border-[#213731]">
+                  <tr>
+                    <th className="py-2.5 px-3 font-pixel">FECHA</th>
+                    <th className="py-2.5 px-3 font-pixel">OPERACIÓN</th>
+                    <th className="py-2.5 px-3 font-pixel">CATEGORÍA</th>
+                    <th className="py-2.5 px-3 font-pixel">CUENTA / BÓVEDA</th>
+                    <th className="py-2.5 px-3 text-right font-pixel">IMPORTE</th>
+                    <th className="py-2.5 px-3 text-center font-pixel">ACCIÓN</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#182622]">
+                  {filteredTransactions.map((tx) => {
+                    const desc = describeTransaction(tx, index)
+                    const cat = desc.categoryId ? index.categories.get(desc.categoryId) : null
+
+                    return (
+                      <tr
+                        key={tx.id}
+                        onClick={() => openTransactionDetail(tx)}
+                        className="hover:bg-[#132420] transition-colors cursor-pointer group"
+                      >
+                        <td className="py-2.5 px-3 whitespace-nowrap font-mono num text-slate-400 text-xs">
+                          {formatShortDate(tx.date, true)}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {(() => {
+                            const itemColor = cat?.color || resolveCategoryColor(cat?.icon, cat?.name || tx.description, tx.kind, tx.isMoto)
+                            return (
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="p-1 rounded bg-[#0d1614] border shrink-0 group-hover:border-emerald-600/50 flex items-center justify-center w-7 h-7"
+                                  style={{ borderColor: `${itemColor}50`, backgroundColor: `${itemColor}15` }}
+                                >
+                                  <CategoryIcon
+                                    icon={cat?.icon}
+                                    categoryName={cat?.name || tx.description}
+                                    kind={tx.kind}
+                                    isMoto={tx.isMoto}
+                                    size={16}
+                                    color={itemColor}
+                                  />
+                                </div>
+                                <div>
+                                  <span className="font-medium text-slate-100 text-xs group-hover:text-emerald-300 transition-colors">{tx.description}</span>
+                                  {tx.notes && (
+                                    <p className="text-[11px] text-slate-500 italic mt-0.5">{tx.notes}</p>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-300 text-xs">
+                          {cat ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px]"
+                              style={{
+                                borderColor: `${cat.color}50`,
+                                backgroundColor: `${cat.color}15`,
+                                color: cat.color || '#6ee7b7',
+                              }}
+                            >
+                              <CategoryIcon icon={cat.icon} categoryName={cat.name} size={12} color={cat.color} />
+                              {cat.name}
+                            </span>
+                          ) : (
+                            <span className="text-slate-600">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-400 text-xs">
+                          {desc.sourceLabel ? (
+                            <span className="font-mono text-slate-300">{desc.sourceLabel}</span>
+                          ) : (
+                            <span className="text-slate-600">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <span
+                            className={`font-pixel font-bold num text-sm tracking-tight ${
+                              desc.tone === 'income'
+                                ? 'text-emerald-400'
+                                : desc.tone === 'expense'
+                                ? 'text-rose-400'
+                                : desc.tone === 'debt'
+                                ? 'text-amber-400'
+                                : desc.tone === 'loan'
+                                ? 'text-purple-400'
+                                : 'text-slate-200'
+                            }`}
                           >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                            {desc.tone === 'income' ? '+' : desc.tone === 'expense' ? '−' : ''}
+                            {formatCOP(desc.amount)}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openTransactionDetail(tx)
+                              }}
+                              className="p-1.5 rounded text-slate-400 hover:text-emerald-300 hover:bg-[#152e25] transition-colors cursor-pointer"
+                              title="Ver detalle y asientos"
+                              aria-label="Ver detalle"
+                            >
+                              <Eye size={13} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleOpenDelete(tx.id, tx.description)
+                              }}
+                              className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              title="Eliminar movimiento"
+                              aria-label="Eliminar"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

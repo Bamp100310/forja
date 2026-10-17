@@ -107,7 +107,7 @@ export const OnboardingModal: React.FC = () => {
             <ForjaLogo variant="compact" />
             <div className="hidden sm:block h-6 w-px bg-[#263c34]" />
             <span className="hidden sm:inline font-stencil text-xs text-amber-400 font-bold tracking-wider">
-              CONFIGURACIÓN INICIAL V2
+              CONFIGURACIÓN INICIAL FORJA III
             </span>
           </div>
 
@@ -412,7 +412,7 @@ export const OnboardingModal: React.FC = () => {
                   className="btn-game btn-game-primary py-2.5 px-6 text-xs font-bold flex items-center gap-2 cursor-pointer shadow-xl"
                 >
                   <Sparkles size={14} />
-                  <span>ENCENDER MI FORJA V2</span>
+                  <span>ENCENDER MI FORJA III</span>
                 </button>
               </div>
             </div>

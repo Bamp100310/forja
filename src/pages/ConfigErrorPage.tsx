@@ -1,17 +1,17 @@
 import React from 'react'
 import { AlertOctagon, Terminal, Server } from 'lucide-react'
-import { PixelSprite } from '../components/common/PixelSprite'
+import { ForjaLogo } from '../components/common/ForjaLogo'
 
 export const ConfigErrorPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0a0f0d] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden select-none">
       <div className="max-w-lg w-full relative z-10">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3 rounded-md bg-[#221010] border-2 border-[#542020] shadow-2xl mb-3">
-            <PixelSprite name="cog" size={38} className="text-rose-500" />
+          <div className="mb-3 flex justify-center">
+            <ForjaLogo variant="compact" showSubtitle={false} />
           </div>
-          <h1 className="font-stencil text-2xl font-black tracking-widest text-rose-400 drop-shadow-md">
-            FORJA — CONFIGURACIÓN PENDIENTE
+          <h1 className="font-stencil text-xl sm:text-2xl font-black tracking-widest text-rose-400 drop-shadow-md">
+            FORJA III — CONFIGURACIÓN PENDIENTE
           </h1>
           <p className="text-[11px] font-stencil text-amber-300 tracking-wider uppercase mt-1">
             CONEXIÓN A SUPABASE REQUERIDA
@@ -27,7 +27,7 @@ export const ConfigErrorPage: React.FC = () => {
           </div>
 
           <p className="text-xs text-slate-300 leading-relaxed mb-4">
-            FORJA está diseñado para operar con persistencia cifrada en Supabase. No se detectaron las variables de entorno necesarias para establecer la conexión con la base de datos de producción.
+            FORJA III está diseñado para operar con persistencia cifrada en Supabase. No se detectaron las variables de entorno necesarias para establecer la conexión con la base de datos de producción.
           </p>
 
           <div className="bg-[#0b0c0e] border border-[#2b1f24] rounded-sm p-3.5 mb-4 text-xs font-mono">
@@ -58,7 +58,7 @@ export const ConfigErrorPage: React.FC = () => {
         </div>
 
         <div className="mt-4 text-center text-[10px] text-slate-400 font-stencil tracking-wider">
-          FORJA v2.0 • PROTOCOLO DE INTEGRIDAD FINANCIERA
+          FORJA III • PROTOCOLO DE INTEGRIDAD FINANCIERA
         </div>
       </div>
     </div>

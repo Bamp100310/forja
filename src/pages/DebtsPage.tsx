@@ -254,9 +254,9 @@ export const DebtsPage: React.FC = () => {
                     {/* Barra de uso de cupo si es tarjeta de crédito */}
                     {isCreditCard && limit > 0 && (
                       <div className="mt-2.5 pt-2 border-t border-[#1c120d]">
-                        <div className="flex items-center justify-between text-[10px] font-stencil text-slate-400 mb-1">
+                        <div className="flex items-center justify-between text-[10px] font-stencil num text-slate-400 mb-1">
                           <span>USO DE CUPO: {usedPercent}%</span>
-                          <span className="text-cyan-300">DISPONIBLE: {formatCOP(summary.available ?? 0)}</span>
+                          <span className="text-cyan-300 num">DISPONIBLE: {formatCOP(summary.available ?? 0)}</span>
                         </div>
                         <div className="w-full bg-[#160d09] h-2 border border-[#2b160f] overflow-hidden flex">
                           <div
@@ -349,18 +349,28 @@ export const DebtsPage: React.FC = () => {
       {/* MODAL NUEVA / EDITAR OBLIGACIÓN */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-amber-800/80 shadow-2xl">
-            <div className="flex items-center justify-between pb-2.5 mb-3 border-b-2 border-[#331c12]">
-              <div className="flex items-center gap-2">
-                <PixelSprite name="chain" size={20} />
-                <h3 className="font-stencil text-base text-amber-400 font-bold tracking-wide">
-                  {editingDebt ? 'MODIFICAR OBLIGACIÓN FINANCIERA' : 'REGISTRAR NUEVA OBLIGACIÓN FINANCIERA'}
-                </h3>
+          <div className="forge-modal-box rivet-corners max-w-xl w-full p-5 sm:p-6 border-2 border-amber-800/80 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b-2 border-[#331c12]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#24160a] border border-amber-700/60">
+                  <PixelSprite name="chain" size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-amber" />
+                    <h3 className="font-stencil text-base text-amber-400 font-bold tracking-wide">
+                      {editingDebt ? 'MODIFICAR OBLIGACIÓN FINANCIERA' : 'REGISTRAR NUEVA OBLIGACIÓN FINANCIERA'}
+                    </h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Estación de pasivos, tarjetas de crédito y compromisos bancarios
+                  </p>
+                </div>
               </div>
               <button
                 onClick={handleCloseModal}
                 disabled={isSubmitting}
-                className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b170f] border border-transparent hover:border-[#4d2818] transition-colors cursor-pointer"
+                className="p-1.5 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b170f] border border-transparent hover:border-[#4d2818] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -434,7 +444,7 @@ export const DebtsPage: React.FC = () => {
                   <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                     SALDO ACTUAL ADEUDADO (COP)
                   </label>
-                  <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" />
+                  <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="0" showQuickIngots={true} />
                 </div>
               )}
 
@@ -443,7 +453,7 @@ export const DebtsPage: React.FC = () => {
                   <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                     CUPO TOTAL DEL CRÉDITO
                   </label>
-                  <MoneyInput value={creditLimit} onChange={setCreditLimit} placeholder="0" />
+                  <MoneyInput value={creditLimit} onChange={setCreditLimit} placeholder="0" showQuickIngots={true} />
                 </div>
               )}
 

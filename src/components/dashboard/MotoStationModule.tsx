@@ -1,243 +1,269 @@
 import React, { useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { Wrench, AlertTriangle, Plus } from 'lucide-react'
 import { useForja } from '../../context/ForjaContext'
-import { formatCOP, formatCOPCompact } from '../../domain/money'
-import { computeMotoStats, latestOdometer, maintenanceReminders } from '../../domain/moto'
+import { formatCOP } from '../../domain/money'
+import { isDateInPeriod } from '../../domain/period'
+import { latestOdometer } from '../../domain/moto'
 import { PixelSprite } from '../common/PixelSprite'
+import { sound } from '../../services/sound'
+import { triggerButtonSparks } from '../common/PixelSparks'
 import motoLargeImg from '../../assets/forja/sprites/moto_large.png'
-import { ArrowRight, Wrench, Fuel, AlertTriangle } from 'lucide-react'
 
 export const MotoStationModule: React.FC = () => {
   const {
     profile,
     period,
-    transactions,
+    summary,
     motoLogs,
     motoMaintenance,
-    index,
-    today,
+    openQuickModal,
   } = useForja()
+  const navigate = useNavigate()
 
-  const stats = useMemo(() => {
-    return computeMotoStats(transactions, motoLogs, index, { start: period.start, end: period.end })
-  }, [transactions, motoLogs, index, period.start, period.end])
+  const motoStats = useMemo(() => {
+    const cutLogs = motoLogs.filter((l) => isDateInPeriod(l.date, period))
+    const totalKm = cutLogs.reduce((acc, l) => acc + (l.km ?? 0), 0)
+    const totalHours = cutLogs.reduce((acc, l) => acc + (l.hours ?? 0), 0)
+    const totalTrips = cutLogs.reduce((acc, l) => acc + (l.tripsCount ?? 0), 0)
 
-  const currentOdo = useMemo(() => {
-    return latestOdometer(motoLogs, motoMaintenance, profile?.motoInitialOdometer ?? null)
-  }, [motoLogs, motoMaintenance, profile?.motoInitialOdometer])
+    const currentOdometer =
+      latestOdometer(motoLogs, motoMaintenance, profile?.motoInitialOdometer ?? 0) ?? 0
 
-  const reminders = useMemo(() => {
-    return maintenanceReminders(motoMaintenance, currentOdo, today)
-  }, [motoMaintenance, currentOdo, today])
+    const netMotoProfit = summary.moto.net
 
-  const urgentReminder = reminders.find((r) => r.overdue) || reminders[0]
-  const marginPercent = stats.gross > 0 ? Math.round((stats.net / stats.gross) * 100) : null
-
-  const gasExpense = useMemo(() => {
-    let total = 0
-    for (const c of stats.costBreakdown) {
-      const cat = index.categories.get(c.categoryId)
-      if (cat && (cat.name.toLowerCase().includes('gasolina') || cat.name.toLowerCase().includes('combustible'))) {
-        total += c.amount
-      }
+    return {
+      totalKm,
+      totalHours,
+      totalTrips,
+      currentOdometer,
+      netMotoProfit,
+      logsCount: cutLogs.length,
     }
-    return total
-  }, [stats.costBreakdown, index.categories])
+  }, [motoLogs, motoMaintenance, period, profile, summary.moto.net])
 
-  const maintExpense = useMemo(() => {
-    let total = 0
-    for (const c of stats.costBreakdown) {
-      const cat = index.categories.get(c.categoryId)
-      if (
-        cat &&
-        (cat.name.toLowerCase().includes('mantenimiento') ||
-          cat.name.toLowerCase().includes('repuesto') ||
-          cat.name.toLowerCase().includes('taller') ||
-          cat.name.toLowerCase().includes('aceite'))
-      ) {
-        total += c.amount
+  const maintenanceBars = useMemo(() => {
+    return motoMaintenance.slice(0, 4).map((m) => {
+      const last = m.odometer ?? motoStats.currentOdometer
+      const nextDue = m.nextDueOdometer ?? last + 3000
+      const interval = Math.max(500, nextDue - last)
+      const kmRemaining = Math.max(0, nextDue - motoStats.currentOdometer)
+      const healthPct = Math.max(
+        0,
+        Math.min(100, Math.round((kmRemaining / interval) * 100)),
+      )
+
+      return {
+        id: m.id,
+        name: m.title,
+        healthPct,
+        kmRemaining,
+        nextDue,
+        status: healthPct > 40 ? 'OK' : healthPct > 15 ? 'PRONTO' : 'URGENTE',
       }
-    }
-    return total
-  }, [stats.costBreakdown, index.categories])
+    })
+  }, [motoMaintenance, motoStats.currentOdometer])
 
   return (
-    <div className="forge-panel p-4 sm:p-5 rivet-corners border-[#28443b] relative overflow-hidden bg-[#121c19]">
-      {/* Encabezado del módulo */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-4 border-b border-[#213730]">
+    <section
+      aria-label="Bahía mecánica de motocicleta y telemetría operativa"
+      className="h-full forge-machine-panel rivet-corners p-4 sm:p-5 flex flex-col justify-between space-y-4"
+    >
+      {/* Cabecera de Estación Mecánica */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#213731]">
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-sm bg-[#162721] border border-emerald-700/50 shadow-inner">
-            <PixelSprite name="moto" size={24} />
+          <div className="p-1.5 rounded-xs bg-[#181209] border border-amber-700/60">
+            <PixelSprite name="moto" size={18} />
           </div>
           <div>
-            <h3 className="font-stencil text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wide">
-              ESTACIÓN DE MOTO — UNIDAD PRODUCTIVA
-            </h3>
-            <p className="text-[11px] text-slate-400 font-pixel">
-              Rendimiento operativo, odómetro, combustible y estado de mantenimiento
+            <div className="flex items-center gap-2">
+              <span className="led-pilot led-pilot-amber" />
+              <h2 className="font-stencil text-xs sm:text-sm font-bold text-amber-300 tracking-wider uppercase">
+                ESTACIÓN MECÁNICA: {profile?.motoName || 'UNIDAD DE REPARTO'}
+              </h2>
+            </div>
+            <p className="text-[11px] text-slate-400 font-pixel mt-0.5">
+              Telemetría de odómetro, rendimiento neto del vehículo y desgaste de componentes
             </p>
           </div>
         </div>
 
-        <Link
-          to="/taller-moto"
-          className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition-colors font-pixel"
-        >
-          <span>Abrir Taller Completo</span>
-          <ArrowRight size={13} />
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              sound.playClick()
+              triggerButtonSparks(e, 'rust', 12)
+              openQuickModal('expense', null, {
+                isMoto: true,
+                description: 'Tanqueo / Mantenimiento Moto',
+              })
+            }}
+            className="btn-game btn-game-secondary text-[10px] py-1 px-2.5 flex items-center gap-1 text-amber-300 cursor-pointer"
+          >
+            <Plus size={12} />
+            <span className="font-pixel">+ GASTO MOTO</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sound.playClick()
+              navigate('/taller-moto')
+            }}
+            className="btn-game btn-game-orange text-[10px] py-1 px-2.5 flex items-center gap-1 cursor-pointer font-pixel font-bold"
+          >
+            <Wrench size={12} />
+            <span>ABRIR TALLER</span>
+          </button>
+        </div>
       </div>
 
-      {/* Contenido en 2 columnas: Bahía mecánica con Pixel Art auténtico e Indicadores de Rendimiento */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-        {/* Columna Izquierda: Bahía de mantenimiento y odómetro con moto_large.png */}
-        <div className="lg:col-span-5 relative rounded-sm border-2 border-[#2b473d] bg-[#0c1513] shadow-lg flex flex-col justify-between overflow-hidden">
-          {/* Fondo de bahía mecánica con cuadrícula sutil y plataforma */}
-          <div className="p-4 sm:p-5 flex flex-col items-center justify-center relative min-h-[160px] bg-gradient-to-b from-[#111c18] via-[#0d1613] to-[#09100e]">
-            {/* Luz de foco cenital sobre la moto */}
-            <div className="absolute top-0 w-36 h-20 bg-amber-400/8 rounded-full blur-xl pointer-events-none" />
-
-            {/* Ilustración de la motocicleta pixel art a escala nítida */}
-            <img
-              src={motoLargeImg}
-              alt="Motocicleta de reparto FORJA"
-              className="w-48 sm:w-56 h-auto object-contain pixel-art relative z-10 transition-transform duration-200 hover:scale-105 select-none"
-              style={{ imageRendering: 'pixelated' }}
-            />
-
-            {/* Plataforma elevadora mecánica bajo las ruedas */}
-            <div className="w-52 h-2.5 bg-[#1b2b25] border-t-2 border-[#335347] border-x border-[#243a31] shadow-md flex items-center justify-around px-2 mt-1">
-              <span className="w-2 h-1 bg-[#406859]" />
-              <span className="w-2 h-1 bg-[#406859]" />
-              <span className="w-2 h-1 bg-[#406859]" />
-              <span className="w-2 h-1 bg-[#406859]" />
-            </div>
+      {/* Bahía Visual de Unidad + Telemetría Operativa */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+        {/* Render Pixel-Art de la Motocicleta en Plataforma de Inspección */}
+        <div className="md:col-span-5 bg-[#080e0c] border-2 border-[#233b32] rounded-xs p-3 flex flex-col items-center justify-center relative overflow-hidden">
+          <div className="absolute top-2 left-2 flex items-center gap-1.5">
+            <span className="badge-pixel bg-[#14261f] text-emerald-300 border-emerald-700/70 text-[8px]">
+              EN SERVICIO
+            </span>
+          </div>
+          <div className="absolute top-2 right-2">
+            <span className="text-[10px] font-bold num text-amber-300 bg-[#191209] border border-amber-700/60 px-1.5 py-0.5 rounded-xs">
+              {motoStats.currentOdometer.toLocaleString('es-CO')} KM
+            </span>
           </div>
 
-          {/* Placa inferior de telemetría de odómetro y modelo */}
-          <div className="p-2.5 bg-[#0e1715] border-t border-[#233c33] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <PixelSprite name="gauge" size={20} />
-              <div>
-                <span className="text-[9px] uppercase font-stencil text-slate-400 block leading-tight">
-                  ODÓMETRO REGISTRADO
-                </span>
-                <span className="font-pixel text-sm font-bold text-slate-100">
-                  {currentOdo !== null ? `${currentOdo.toLocaleString('es-CO')} km` : 'Sin lecturas'}
-                </span>
-              </div>
-            </div>
+          <img
+            src={motoLargeImg}
+            alt={profile?.motoName || 'Motocicleta de trabajo'}
+            className="w-36 h-28 object-contain pixel-art my-3 drop-shadow-[0_6px_12px_rgba(0,0,0,0.9)]"
+          />
 
-            <span className="badge-pixel bg-[#12261a] text-emerald-300 border-[#234b31] text-[9px]">
-              {profile?.motoName || 'MOTO 125CC'}
+          <div className="w-full pt-2 border-t border-[#1b2f27] flex items-center justify-between text-[10px] font-pixel">
+            <span className="text-slate-400">Jornadas en el corte:</span>
+            <span className="text-emerald-400 font-bold num">
+              {motoStats.logsCount} REGISTROS
             </span>
           </div>
         </div>
 
-        {/* Columna Derecha: Indicadores operativos de la máquina */}
-        <div className="lg:col-span-7 space-y-3">
-          {/* Matriz de 3 métricas clave */}
-          <div className="grid grid-cols-3 gap-2.5">
-            <div className="bg-[#101b18] border border-[#233a33] p-2.5 rounded-sm text-center">
-              <span className="text-[10px] uppercase font-stencil text-slate-400 block mb-0.5">
-                PRODUCCIÓN BRUTA
-              </span>
-              <span className="font-pixel text-sm sm:text-base font-black text-emerald-300 block">
-                {formatCOPCompact(stats.gross)}
-              </span>
-              <span className="text-[10px] text-slate-400 font-pixel">Reparto y viajes</span>
+        {/* Telemetría de Rendimiento de la Motocicleta */}
+        <div className="md:col-span-7 grid grid-cols-2 gap-2.5">
+          <div className="bg-[#0b1311] border border-[#1e342c] p-3 rounded-xs">
+            <span className="text-[10px] text-slate-400 font-stencil uppercase block">
+              INGRESO BRUTO MOTO
+            </span>
+            <div className="text-base sm:text-lg font-bold num text-emerald-400 mt-1">
+              +{formatCOP(summary.moto.income)}
             </div>
-
-            <div className="bg-[#101b18] border border-[#233a33] p-2.5 rounded-sm text-center">
-              <span className="text-[10px] uppercase font-stencil text-slate-400 block mb-0.5">
-                COSTES DIRECTOS
-              </span>
-              <span className="font-pixel text-sm sm:text-base font-black text-rose-300 block">
-                {formatCOPCompact(stats.costs)}
-              </span>
-              <span className="text-[10px] text-slate-400 font-pixel">Gasolina + repuestos</span>
-            </div>
-
-            <div className="bg-[#14261f] border-2 border-emerald-600/70 p-2.5 rounded-sm text-center">
-              <span className="text-[10px] uppercase font-stencil text-emerald-400 block mb-0.5">
-                MARGEN LIMPIO
-              </span>
-              <span className="font-pixel text-sm sm:text-base font-black text-emerald-200 block">
-                {formatCOPCompact(stats.net)}
-              </span>
-              <span className="text-[10px] text-emerald-400 font-bold font-stencil">
-                {marginPercent !== null ? `${marginPercent}% MARGEN` : 'N/D'}
-              </span>
-            </div>
+            <span className="text-[10px] text-slate-500 font-pixel">
+              Producción en el corte
+            </span>
           </div>
 
-          {/* Desglose de insumos de moto: Combustible vs Mantenimiento */}
-          <div className="bg-[#0e1815] border border-[#213730] rounded-sm p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs font-pixel">
-              <div className="flex items-center gap-2">
-                <Fuel size={14} className="text-amber-400" />
-                <span className="text-slate-300">Gasto en Combustible:</span>
-              </div>
-              <span className="font-bold text-slate-100">
-                {formatCOP(gasExpense)}
-              </span>
+          <div className="bg-[#0b1311] border border-[#1e342c] p-3 rounded-xs">
+            <span className="text-[10px] text-slate-400 font-stencil uppercase block">
+              GASTO OPERATIVO MOTO
+            </span>
+            <div className="text-base sm:text-lg font-bold num text-rose-400 mt-1">
+              −{formatCOP(summary.moto.expense)}
             </div>
-
-            <div className="flex items-center justify-between text-xs font-pixel">
-              <div className="flex items-center gap-2">
-                <Wrench size={14} className="text-cyan-400" />
-                <span className="text-slate-300">Taller y Mantenimiento:</span>
-              </div>
-              <span className="font-bold text-slate-100">
-                {formatCOP(maintExpense)}
-              </span>
-            </div>
-
-            {stats.costPerKm !== null && (
-              <div className="pt-2 border-t border-[#1c2e28] flex items-center justify-between text-xs font-pixel">
-                <span className="text-slate-400">Costo real verificado por km:</span>
-                <span className="text-amber-300 font-bold">
-                  {formatCOP(stats.costPerKm)} / km
-                </span>
-              </div>
-            )}
+            <span className="text-[10px] text-slate-500 font-pixel">
+              Gasolina, aceite y taller
+            </span>
           </div>
 
-          {/* Alerta de mantenimiento activo */}
-          {urgentReminder ? (
+          <div className="bg-[#0b1311] border border-[#1e342c] p-3 rounded-xs">
+            <span className="text-[10px] text-slate-400 font-stencil uppercase block">
+              RECORRIDO EN EL CORTE
+            </span>
+            <div className="text-base sm:text-lg font-bold num text-amber-300 mt-1">
+              {motoStats.totalKm.toLocaleString('es-CO')} KM
+            </div>
+            <span className="text-[10px] text-slate-500 font-pixel num">
+              Viajes: {motoStats.totalTrips} • Horas: {motoStats.totalHours}h
+            </span>
+          </div>
+
+          <div className="bg-[#0e1915] border border-emerald-800/60 p-3 rounded-xs">
+            <span className="text-[10px] text-emerald-300 font-stencil uppercase block">
+              UTILIDAD NETA MOTO
+            </span>
             <div
-              className={`p-2.5 rounded-sm border flex items-center justify-between text-xs ${
-                urgentReminder.overdue
-                  ? 'bg-rose-950/60 border-rose-800 text-rose-200'
-                  : 'bg-[#12221d] border-emerald-800/60 text-emerald-200'
+              className={`text-base sm:text-lg font-bold num mt-1 ${
+                motoStats.netMotoProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <AlertTriangle
-                  size={15}
-                  className={urgentReminder.overdue ? 'text-rose-400 shrink-0' : 'text-emerald-400 shrink-0'}
-                />
-                <div>
-                  <span className="font-bold block leading-tight font-pixel">{urgentReminder.maintenance.title}</span>
-                  <span className="text-[10px] text-slate-300 font-pixel">
-                    {urgentReminder.reason === 'odometer'
-                      ? `Próximo cambio por km (${urgentReminder.kmLeft !== null ? `${urgentReminder.kmLeft} km restantes` : 'Límite alcanzado'})`
-                      : `Próximo cambio por fecha (${urgentReminder.daysLeft !== null ? `${urgentReminder.daysLeft} días restantes` : 'Límite alcanzado'})`}
-                  </span>
-                </div>
-              </div>
-              <span className="badge-pixel text-[9px] uppercase">
-                {urgentReminder.overdue ? 'VENCIDO' : 'AL DÍA'}
-              </span>
+              {motoStats.netMotoProfit >= 0 ? '+' : ''}
+              {formatCOP(motoStats.netMotoProfit)}
             </div>
-          ) : (
-            <div className="p-2.5 rounded-sm border border-[#213730] bg-[#0e1715] flex items-center gap-2 text-xs text-slate-400 font-pixel">
-              <Wrench size={14} className="text-emerald-400" />
-              <span>Sin alertas pendientes de mantenimiento en este momento.</span>
-            </div>
-          )}
+            <span className="text-[10px] text-slate-400 font-pixel">
+              Libre tras costos
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Barras de Integridad de Piezas y Mantenimiento Preventivo */}
+      <div className="pt-2 border-t border-[#1e342c] space-y-2.5">
+        <div className="flex items-center justify-between text-[10px] font-stencil text-slate-400 uppercase tracking-wider">
+          <span>INTEGRIDAD DE COMPONENTES Y MANTENIMIENTO PREVENTIVO</span>
+          <span className="text-emerald-400 num">
+            {maintenanceBars.length} SISTEMAS MONITOREADOS
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {maintenanceBars.map((item) => {
+            const barColor =
+              item.healthPct > 40
+                ? 'bg-emerald-500'
+                : item.healthPct > 15
+                  ? 'bg-amber-400'
+                  : 'bg-rose-500'
+
+            return (
+              <div
+                key={item.id}
+                className="bg-[#09100e] border border-[#1c3028] p-2.5 rounded-xs space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-pixel font-bold text-slate-200 truncate flex items-center gap-1">
+                    {item.status === 'URGENTE' && (
+                      <AlertTriangle size={12} className="text-rose-400 shrink-0" />
+                    )}
+                    <span>{item.name}</span>
+                  </span>
+                  <span
+                    className={`badge-pixel text-[8px] px-1.5 py-0.5 ${
+                      item.status === 'OK'
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                        : item.status === 'PRONTO'
+                          ? 'bg-amber-950 text-amber-300 border-amber-700'
+                          : 'bg-rose-950 text-rose-300 border-rose-700'
+                    }`}
+                  >
+                    {item.status} • {item.healthPct}%
+                  </span>
+                </div>
+
+                <div className="w-full h-2 bg-[#050807] rounded-xs overflow-hidden border border-[#1d3129]">
+                  <div
+                    className={`h-full ${barColor} transition-all duration-500`}
+                    style={{ width: `${item.healthPct}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-pixel num">
+                  <span>Restan: {item.kmRemaining.toLocaleString('es-CO')} km</span>
+                  <span>Cambio a los {item.nextDue.toLocaleString('es-CO')} km</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </section>
   )
 }

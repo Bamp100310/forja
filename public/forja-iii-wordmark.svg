@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 88" shape-rendering="crispEdges">
+  <!-- Placa Maestra de Hierro Fundido FORJA III -->
+  <rect x="2" y="4" width="356" height="80" rx="4" fill="#090e0c"/>
+  <rect x="4" y="6" width="352" height="76" rx="3" fill="#78350f"/>
+  <rect x="6" y="8" width="348" height="72" rx="2" fill="#b45309"/>
+  <rect x="8" y="10" width="344" height="68" fill="#101915"/>
+
+  <!-- Bisel interior y división de bahía -->
+  <rect x="10" y="12" width="246" height="64" fill="#0c1411"/>
+  <rect x="258" y="12" width="92" height="64" fill="#181009"/>
+  <rect x="256" y="10" width="2" height="68" fill="#d97706"/>
+
+  <!-- Remaches de Esquina -->
+  <rect x="12" y="14" width="4" height="4" fill="#fbbf24"/>
+  <rect x="12" y="70" width="4" height="4" fill="#d97706"/>
+  <rect x="344" y="14" width="4" height="4" fill="#fbbf24"/>
+  <rect x="344" y="70" width="4" height="4" fill="#d97706"/>
+
+  <!-- Emblema de Yunque y Fragua (Izquierda) -->
+  <g transform="translate(22, 22)">
+    <!-- Llama / Lingotes -->
+    <rect x="10" y="2" width="4" height="14" fill="#f59e0b"/>
+    <rect x="18" y="0" width="4" height="16" fill="#fbbf24"/>
+    <rect x="26" y="2" width="4" height="14" fill="#f59e0b"/>
+    <!-- Yunque -->
+    <rect x="2" y="20" width="6" height="4" fill="#94a3b8"/>
+    <rect x="8" y="18" width="28" height="8" fill="#cbd5e1"/>
+    <rect x="14" y="26" width="16" height="8" fill="#64748b"/>
+    <rect x="8" y="34" width="28" height="6" fill="#475569"/>
+  </g>
+
+  <!-- Wordmark FORJA en Acero Forjado -->
+  <text x="76" y="55" font-family="'Silkscreen', 'Pixelify Sans', monospace" font-size="34" font-weight="bold" fill="#f8fafc" letter-spacing="3">FORJA</text>
+  <rect x="76" y="61" width="164" height="3" fill="#d97706"/>
+
+  <!-- Bahía Ornamental Numeral Romano III -->
+  <g transform="translate(268, 18)">
+    <!-- Travesaño Superior -->
+    <rect x="4" y="4" width="64" height="6" fill="#fbbf24"/>
+    <rect x="6" y="6" width="60" height="2" fill="#fef08a"/>
+    <!-- Tres Pilares Forjados III -->
+    <rect x="10" y="10" width="10" height="32" fill="#f59e0b"/>
+    <rect x="12" y="10" width="4" height="32" fill="#fde047"/>
+    <rect x="31" y="10" width="10" height="32" fill="#f59e0b"/>
+    <rect x="33" y="10" width="4" height="32" fill="#fde047"/>
+    <rect x="52" y="10" width="10" height="32" fill="#f59e0b"/>
+    <rect x="54" y="10" width="4" height="32" fill="#fde047"/>
+    <!-- Travesaño Inferior -->
+    <rect x="4" y="42" width="64" height="6" fill="#d97706"/>
+    <rect x="6" y="44" width="60" height="2" fill="#fbbf24"/>
+  </g>
+</svg>

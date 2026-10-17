@@ -37,7 +37,7 @@ export const WarehouseStorageModule: React.FC = () => {
             </div>
           </div>
 
-          <span className="badge-pixel bg-[#14231f] text-slate-300 border-[#254238] text-[10px]">
+          <span className="badge-pixel num bg-[#14231f] text-slate-300 border-[#254238] text-[10px]">
             {formatCOPCompact(summary.expense)} TOTAL
           </span>
         </div>
@@ -61,8 +61,8 @@ export const WarehouseStorageModule: React.FC = () => {
                       {cat.name}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-400 text-[11px] font-stencil">{percent}%</span>
-                      <span className="text-slate-100 font-bold">{formatCOP(cat.amount)}</span>
+                      <span className="text-slate-400 text-[11px] font-stencil num">{percent}%</span>
+                      <span className="text-slate-100 font-bold num">{formatCOP(cat.amount)}</span>
                     </div>
                   </div>
 

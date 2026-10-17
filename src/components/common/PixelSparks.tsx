@@ -81,7 +81,10 @@ export const PixelSparks: React.FC = () => {
     window.addEventListener('resize', resizeCanvas)
 
     const handleSparkEvent = (e: Event) => {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) {
         return
       }
 

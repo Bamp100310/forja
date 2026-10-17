@@ -270,7 +270,7 @@ export const SettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 w-full">
       {/* Cabecera del Centro de Ajustes */}
       <div className="forge-machine-panel rivet-corners p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -285,7 +285,7 @@ export const SettingsPage: React.FC = () => {
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Personalización de módulos V2, ciclos contables, operario, sonido y respaldo
+              Personalización de módulos FORJA III, ciclos contables, operario, sonido y respaldo
             </p>
           </div>
         </div>

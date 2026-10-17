@@ -670,17 +670,27 @@ export const MotoPage: React.FC = () => {
       {/* MODAL REGISTRO DE JORNADA */}
       {logModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 mb-3 border-b-2 border-[#233c33] bg-[#070d0b] -mx-5 -mt-5 p-3 px-5 rounded-t-sm">
-              <div className="flex items-center gap-2">
-                <PixelSprite name="gauge" size={18} />
-                <h3 className="font-stencil text-base text-emerald-400 font-bold">
-                  REGISTRAR JORNADA Y ODÓMETRO
-                </h3>
+          <div className="forge-modal-box rivet-corners max-w-xl w-full p-5 sm:p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b-2 border-[#233c33]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#10201a] border border-emerald-700/60">
+                  <PixelSprite name="gauge" size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-online" />
+                    <h3 className="font-stencil text-base text-emerald-400 font-bold">
+                      REGISTRAR JORNADA Y ODÓMETRO
+                    </h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Telemetría de turno, entregas y kilometraje recorrido
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setLogModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -784,17 +794,27 @@ export const MotoPage: React.FC = () => {
       {/* MODAL REGISTRO DE MANTENIMIENTO */}
       {maintModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 mb-3 border-b-2 border-[#233c33] bg-[#070d0b] -mx-5 -mt-5 p-3 px-5 rounded-t-sm">
-              <div className="flex items-center gap-2">
-                <PixelSprite name="tools" size={18} />
-                <h3 className="font-stencil text-base text-amber-400 font-bold">
-                  REGISTRAR MANTENIMIENTO EN TALLER
-                </h3>
+          <div className="forge-modal-box rivet-corners max-w-xl w-full p-5 sm:p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b-2 border-[#233c33]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#24160a] border border-amber-700/60">
+                  <PixelSprite name="tools" size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-amber" />
+                    <h3 className="font-stencil text-base text-amber-400 font-bold">
+                      REGISTRAR MANTENIMIENTO EN TALLER
+                    </h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Bitácora preventiva y correctiva de componentes mecánicos
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setMaintModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X size={16} />
               </button>

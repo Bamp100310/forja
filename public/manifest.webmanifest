@@ -1,17 +1,32 @@
 {
-  "name": "FORJA — Taller financiero",
-  "short_name": "FORJA",
-  "description": "Finanzas personales, ingresos de moto, deudas y préstamos en un solo taller.",
+  "name": "FORJA III — Taller Financiero & Gestión Industrial",
+  "short_name": "FORJA III",
+  "description": "Estación de control financiero artesanal e industrial. Gestión de cuentas, bóvedas, quincenas, deudas, metas y taller de motocicleta.",
   "lang": "es-CO",
-  "theme_color": "#0e1312",
-  "background_color": "#0e1312",
+  "theme_color": "#0b1110",
+  "background_color": "#090d0b",
   "display": "standalone",
   "orientation": "any",
   "start_url": "./",
   "scope": "./",
   "icons": [
-    { "src": "./pwa-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "./pwa-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "./pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "./pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

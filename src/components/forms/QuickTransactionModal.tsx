@@ -127,6 +127,7 @@ export const QuickTransactionModal: React.FC = () => {
   const [amount, setAmount] = useState<number>(0)
   const [commission, setCommission] = useState<number>(0)
   const [tip, setTip] = useState<number>(0)
+  const [tipAccountId, setTipAccountId] = useState<string>('')
   const [categoryId, setCategoryId] = useState<string>('')
   const [accountId, setAccountId] = useState<string>('')
   const [toAccountId, setToAccountId] = useState<string>('')
@@ -483,6 +484,8 @@ export const QuickTransactionModal: React.FC = () => {
                 ? quickModalPrefill?.toAccountId || quickModalPrefill?.accountId || accounts[0].id
                 : quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
             setAccountId(preferredAccount)
+            const defaultTipAcc = accounts.find((a) => a.kind === 'cash') || accounts.find((a) => a.id === preferredAccount) || accounts[0]
+            setTipAccountId(defaultTipAcc?.id || preferredAccount)
             if (accounts.length > 1 && !quickModalPrefill?.toAccountId) {
               setToAccountId(accounts[1].id)
             }
@@ -578,10 +581,10 @@ export const QuickTransactionModal: React.FC = () => {
     setErrorMessage(null)
     setIsSubmitting(true)
     sound.playClick()
-    triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.5, 'forge', 14)
 
     try {
       let op: OperationInput
+      const createSeparateTipTx = !editingTransaction && kind === 'income' && tip > 0
 
       if (kind === 'income') {
         if (amount <= 0) {
@@ -603,7 +606,7 @@ export const QuickTransactionModal: React.FC = () => {
           accountId,
           amount,
           commission: commission > 0 ? commission : undefined,
-          tip: tip > 0 ? tip : undefined,
+          tip: !createSeparateTipTx && tip > 0 ? tip : undefined,
           payrollScheduleId: quickModalPrefill?.payrollScheduleId || null,
           expectedPaydayDate: quickModalPrefill?.expectedPaydayDate || null,
         }
@@ -860,6 +863,21 @@ export const QuickTransactionModal: React.FC = () => {
         editingTransaction?.clientRequestId
       )
 
+      if (createSeparateTipTx) {
+        const tipOp: OperationInput = {
+          kind: 'income',
+          date,
+          description: 'Propina',
+          notes: notes.trim() || null,
+          isMoto,
+          categoryId,
+          accountId: tipAccountId || accountId,
+          amount: tip,
+        }
+        const tipDraft = buildTransactionDraft(tipOp, { categories })
+        await saveTransaction(tipDraft)
+      }
+
       // Feedback audiovisual confirmado tras persistencia exitosa
       if (kind === 'income' || kind === 'loan_repayment') {
         sound.playIncome()
@@ -882,385 +900,968 @@ export const QuickTransactionModal: React.FC = () => {
     }
   }
 
+  // =========================================================================
+  // TELEMETRÍA EN VIVO DE LA PRENSA DE PARTIDA DOBLE (COLUMNA DERECHA)
+  // =========================================================================
+  const liveBlueprint = useMemo(() => {
+    if (kind === 'income') {
+      const separateTip = !editingTransaction && tip > 0
+      const netIn = separateTip
+        ? Math.max(0, amount - commission)
+        : Math.max(0, amount - commission + tip)
+      const grossMain = separateTip ? amount : amount + tip
+      const tipAccName =
+        accounts.find((a) => a.id === (tipAccountId || accountId))?.name ||
+        fromAccount?.name ||
+        'Bóveda de Propina'
+
+      return {
+        sourceTitle: 'FUENTE / CATEGORÍA',
+        sourceName: selectedCat?.name || 'Categoría de Ingreso',
+        destTitle: 'BÓVEDA RECEPTORA',
+        destName: fromAccount?.name || 'Bóveda de Destino',
+        vaultLabel: fromAccount?.name || 'Bóveda',
+        currentBalance: fromBalance,
+        projectedBalance:
+          fromBalance + netIn + (separateTip && (tipAccountId || accountId) === accountId ? tip : 0),
+        deltaAmount: netIn + (separateTip && (tipAccountId || accountId) === accountId ? tip : 0),
+        deltaSign: '+' as const,
+        tone: 'emerald' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: fromAccount?.name || 'Bóveda receptora',
+            amount: netIn,
+            isDebit: true,
+          },
+          ...(commission > 0
+            ? [
+                {
+                  role: 'DÉBITO (+)',
+                  target: 'Comisión de plataforma',
+                  amount: commission,
+                  isDebit: true,
+                },
+              ]
+            : []),
+          {
+            role: 'CRÉDITO (−)',
+            target: selectedCat?.name || 'Ingreso operativo',
+            amount: grossMain,
+            isDebit: false,
+          },
+          ...(separateTip
+            ? [
+                {
+                  role: 'MOV. APARTE (+)',
+                  target: `Propina → ${tipAccName}`,
+                  amount: tip,
+                  isDebit: true,
+                },
+              ]
+            : []),
+        ],
+      }
+    }
+
+    if (kind === 'expense') {
+      const selectedDebt = debts.find((d) => d.id === debtId)
+      const isDebtMethod = paymentMethod === 'debt'
+      const curBal = isDebtMethod
+        ? (balances.debtBalance.get(debtId) ?? 0)
+        : fromBalance
+      const projBal = isDebtMethod ? curBal + amount : curBal - amount
+
+      return {
+        sourceTitle: isDebtMethod ? 'PASIVO / TARJETA' : 'BÓVEDA PAGADORA',
+        sourceName: isDebtMethod
+          ? selectedDebt?.name || 'Tarjeta de Crédito'
+          : fromAccount?.name || 'Bóveda de Pago',
+        destTitle: 'DESTINO DEL CONSUMO',
+        destName: selectedCat?.name || 'Categoría de Gasto',
+        vaultLabel: isDebtMethod
+          ? `${selectedDebt?.name || 'Deuda'} (Saldo adeudado)`
+          : fromAccount?.name || 'Bóveda',
+        currentBalance: curBal,
+        projectedBalance: projBal,
+        deltaAmount: amount,
+        deltaSign: isDebtMethod ? ('+' as const) : ('−' as const),
+        tone: 'rose' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: selectedCat?.name || 'Gasto operativo',
+            amount,
+            isDebit: true,
+          },
+          {
+            role: 'CRÉDITO (−)',
+            target: isDebtMethod
+              ? selectedDebt?.name || 'Pasivo / Tarjeta'
+              : fromAccount?.name || 'Bóveda pagadora',
+            amount,
+            isDebit: false,
+          },
+        ],
+      }
+    }
+
+    if (kind === 'transfer') {
+      const totalOut = amount + fee
+      return {
+        sourceTitle: 'BÓVEDA DE ORIGEN',
+        sourceName: fromAccount?.name || 'Origen',
+        destTitle: 'BÓVEDA DE DESTINO',
+        destName: toAccount?.name || 'Destino',
+        vaultLabel: `${fromAccount?.name || 'Origen'} → ${toAccount?.name || 'Destino'}`,
+        currentBalance: fromBalance,
+        projectedBalance: projectedFromBalance,
+        deltaAmount: totalOut,
+        deltaSign: '−' as const,
+        tone: 'cyan' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: toAccount?.name || 'Bóveda destino',
+            amount,
+            isDebit: true,
+          },
+          ...(fee > 0
+            ? [
+                {
+                  role: 'DÉBITO (+)',
+                  target: 'Costo financiero / Comisión',
+                  amount: fee,
+                  isDebit: true,
+                },
+              ]
+            : []),
+          {
+            role: 'CRÉDITO (−)',
+            target: fromAccount?.name || 'Bóveda origen',
+            amount: totalOut,
+            isDebit: false,
+          },
+        ],
+      }
+    }
+
+    if (kind === 'debt_payment') {
+      const targetDebt = debts.find((d) => d.id === debtId)
+      const curDebt = balances.debtBalance.get(debtId) ?? 0
+      const totalOut = principal + interest + debtFees
+      const sourceLabel =
+        debtFundingSource === 'loan'
+          ? loans.find((l) => l.id === fromLoanId)?.personName || loanPersonName || 'Cruce Préstamo'
+          : fromAccount?.name || 'Bóveda pagadora'
+
+      return {
+        sourceTitle: debtFundingSource === 'loan' ? 'COMPENSACIÓN DEUDOR' : 'BÓVEDA PAGADORA',
+        sourceName: sourceLabel,
+        destTitle: 'OBLIGACIÓN / PASIVO',
+        destName: targetDebt?.name || 'Deuda',
+        vaultLabel: `Deuda: ${targetDebt?.name || 'Pasivo'}`,
+        currentBalance: curDebt,
+        projectedBalance: Math.max(0, curDebt - principal),
+        deltaAmount: principal,
+        deltaSign: '−' as const,
+        tone: 'amber' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: `Capital (${targetDebt?.name || 'Deuda'})`,
+            amount: principal,
+            isDebit: true,
+          },
+          ...(interest + debtFees > 0
+            ? [
+                {
+                  role: 'DÉBITO (+)',
+                  target: 'Intereses y cargos financieros',
+                  amount: interest + debtFees,
+                  isDebit: true,
+                },
+              ]
+            : []),
+          {
+            role: 'CRÉDITO (−)',
+            target: sourceLabel,
+            amount: totalOut,
+            isDebit: false,
+          },
+        ],
+      }
+    }
+
+    if (kind === 'loan_given') {
+      const debtor = isNewLoan
+        ? loanPersonName.trim() || 'Nuevo Deudor'
+        : loans.find((l) => l.id === loanId)?.personName || 'Deudor'
+      return {
+        sourceTitle: 'BÓVEDA DESEMBOLSO',
+        sourceName: fromAccount?.name || 'Bóveda origen',
+        destTitle: 'CUENTA POR COBRAR',
+        destName: debtor,
+        vaultLabel: fromAccount?.name || 'Bóveda origen',
+        currentBalance: fromBalance,
+        projectedBalance: fromBalance - amount,
+        deltaAmount: amount,
+        deltaSign: '−' as const,
+        tone: 'amber' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: `Préstamo por cobrar (${debtor})`,
+            amount,
+            isDebit: true,
+          },
+          {
+            role: 'CRÉDITO (−)',
+            target: fromAccount?.name || 'Bóveda desembolso',
+            amount,
+            isDebit: false,
+          },
+        ],
+      }
+    }
+
+    // loan_repayment
+    if (collectionSource === 'platform') {
+      const pAcc = accounts.find((a) => a.id === platformAccountId)
+      return {
+        sourceTitle: 'PLATAFORMA ORIGEN',
+        sourceName: pAcc?.name || 'Saldo en Apps',
+        destTitle: 'BÓVEDA RECEPTORA',
+        destName: toAccount?.name || 'Bóveda destino',
+        vaultLabel: `Por cobrar en ${pAcc?.name || 'App'}`,
+        currentBalance: currentPlatformBalance,
+        projectedBalance: currentPlatformBalance - amount,
+        deltaAmount: amount,
+        deltaSign: '−' as const,
+        tone: 'emerald' as const,
+        postings: [
+          {
+            role: 'DÉBITO (+)',
+            target: toAccount?.name || 'Bóveda receptora',
+            amount,
+            isDebit: true,
+          },
+          {
+            role: 'CRÉDITO (−)',
+            target: pAcc?.name || 'Plataforma',
+            amount,
+            isDebit: false,
+          },
+        ],
+      }
+    }
+
+    const debtor = selectedRepaymentLoan?.personName || 'Deudor'
+    const curLoanBal = selectedRepaymentLoan
+      ? (balances.loanPending.get(selectedRepaymentLoan.id) ?? 0)
+      : 0
+    const destLabel =
+      loanRepaymentDest === 'debt'
+        ? debts.find((d) => d.id === toDebtId)?.name || 'Deuda propia'
+        : fromAccount?.name || 'Bóveda receptora'
+
+    return {
+      sourceTitle: 'DEUDOR QUE ABONA',
+      sourceName: debtor,
+      destTitle: loanRepaymentDest === 'debt' ? 'CRUCE A MI DEUDA' : 'BÓVEDA RECEPTORA',
+      destName: destLabel,
+      vaultLabel: `Saldo por cobrar a ${debtor}`,
+      currentBalance: curLoanBal,
+      projectedBalance: Math.max(0, curLoanBal - principal),
+      deltaAmount: principal,
+      deltaSign: '−' as const,
+      tone: 'emerald' as const,
+      postings: [
+        {
+          role: 'DÉBITO (+)',
+          target: destLabel,
+          amount: principal + interest,
+          isDebit: true,
+        },
+        {
+          role: 'CRÉDITO (−)',
+          target: `Capital préstamo (${debtor})`,
+          amount: principal,
+          isDebit: false,
+        },
+        ...(interest > 0
+          ? [
+              {
+                role: 'CRÉDITO (−)',
+                target: 'Intereses ganados',
+                amount: interest,
+                isDebit: false,
+              },
+            ]
+          : []),
+      ],
+    }
+  }, [
+    kind,
+    amount,
+    commission,
+    tip,
+    tipAccountId,
+    accountId,
+    editingTransaction,
+    fee,
+    principal,
+    interest,
+    debtFees,
+    selectedCat,
+    fromAccount,
+    toAccount,
+    fromBalance,
+    projectedFromBalance,
+    paymentMethod,
+    debtId,
+    debts,
+    balances.debtBalance,
+    balances.loanPending,
+    debtFundingSource,
+    fromLoanId,
+    loans,
+    loanPersonName,
+    isNewLoan,
+    loanId,
+    collectionSource,
+    platformAccountId,
+    accounts,
+    currentPlatformBalance,
+    selectedRepaymentLoan,
+    loanRepaymentDest,
+    toDebtId,
+  ])
+
   return (
     <Dialog.Root open={quickModalOpen} onOpenChange={(open) => !open && closeQuickModal()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/85 backdrop-blur-xs z-[60]" />
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 pointer-events-none">
-          <Dialog.Content className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto forge-modal-box rivet-corners p-4 sm:p-5 shadow-2xl focus:outline-none">
-          <div className="flex items-center justify-between pb-3 border-b-2 border-[#233a30]">
-            <Dialog.Title className="font-stencil text-base text-emerald-400 font-bold flex items-center gap-2 tracking-wide">
-              <PixelSprite name="tools" size={20} />
-              <span>{editingTransaction ? 'MODIFICAR MOVIMIENTO' : 'FORJAR MOVIMIENTO'}</span>
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <button
-                className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#1a2d25] border border-transparent hover:border-[#2f5243] transition-colors cursor-pointer"
-                aria-label="Cerrar modal"
-              >
-                <X size={18} />
-              </button>
-            </Dialog.Close>
-          </div>
-
-          {editingTransaction && (
-            <div className="mt-3 bg-amber-950/40 border border-amber-600/60 text-amber-300 px-3 py-1.5 rounded-xs text-[11px] font-pixel flex items-center justify-between">
-              <span>MODO EDICIÓN: Ref. #{editingTransaction.id.slice(0, 8)}</span>
-              <span className="font-stencil uppercase text-[10px] text-amber-400">{TRANSACTION_KIND_LABELS[editingTransaction.kind]}</span>
-            </div>
-          )}
-
-          {/* Selector de pestañas por tipo de operación con PixelSprites auténticos */}
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 my-3.5 bg-[#070c0a] p-1.5 rounded-xs border-2 border-[#233a30]">
-            <button
-              type="button"
-              onClick={() => handleKindChange('income')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'income'
-                  ? 'bg-[#12261a] text-emerald-300 border-2 border-emerald-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="coins" size={18} />
-              <span>INGRESO</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKindChange('expense')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'expense'
-                  ? 'bg-[#2b140e] text-rose-300 border-2 border-rose-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="parcel" size={18} />
-              <span>GASTO</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKindChange('transfer')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'transfer'
-                  ? 'bg-[#0f2121] text-cyan-300 border-2 border-cyan-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="conveyor" size={18} />
-              <span>TRANSFERIR</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKindChange('debt_payment')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'debt_payment'
-                  ? 'bg-[#2a1d0b] text-amber-300 border-2 border-amber-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="chain" size={18} />
-              <span>DEUDA</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKindChange('loan_given')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'loan_given'
-                  ? 'bg-[#27150c] text-orange-300 border-2 border-orange-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="sack" size={18} />
-              <span>PRESTAR</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKindChange('loan_repayment')}
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer ${
-                kind === 'loan_repayment'
-                  ? 'bg-[#12261a] text-emerald-300 border-2 border-emerald-600 font-bold shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#101b17] border border-transparent'
-              }`}
-            >
-              <PixelSprite name="ledger_check" size={18} />
-              <span>COBRAR</span>
-            </button>
-          </div>
-
-          {errorMessage && (
-            <div className="flex items-start gap-2 bg-rose-950/80 border-2 border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel my-3">
-              <AlertCircle size={16} className="shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-3.5">
-            {/* Fecha y Descripción */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                  FECHA
-                </label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                  className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                  DESCRIPCIÓN OPERATIVA
-                </label>
-                <input
-                  type="text"
-                  placeholder={
-                    kind === 'expense'
-                      ? isMoto
-                        ? 'Ej. Gasolina Terpel / Repuestos moto'
-                        : 'Ej. Pizza a domicilio / Mercado / Almuerzo'
-                      : kind === 'income'
-                      ? isMoto
-                        ? 'Ej. Turno Rappi / DiDi'
-                        : 'Ej. Quincena nómina fija / Honorarios'
-                      : kind === 'transfer'
-                      ? 'Ej. Traslado a efectivo o ahorros'
-                      : kind === 'debt_payment'
-                      ? 'Ej. Abono tarjeta / Pago cuota préstamo'
-                      : kind === 'loan_given'
-                      ? 'Ej. Préstamo a familiar o amigo'
-                      : 'Ej. Cobro o abono recibido'
-                  }
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
-                />
-              </div>
-            </div>
-
-            {/* FORMULARIO DE INGRESO */}
-            {kind === 'income' && (
-              <>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-4 pointer-events-none">
+          <Dialog.Content className="pointer-events-auto w-full max-w-4xl max-h-[94vh] overflow-y-auto forge-modal-box rivet-corners p-4 sm:p-6 shadow-2xl focus:outline-none border-2 border-[#2e4d40] bg-[#0b1310]">
+            {/* ===============================================================
+                CABECERA DE ESTACIÓN DE FUNDICIÓN Y PARTIDA DOBLE
+                =============================================================== */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b-2 border-[#233a30]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#181209] border border-amber-600/70 shadow-inner">
+                  <PixelSprite name="anvil" size={20} />
+                </div>
                 <div>
-                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                    INGRESO BRUTO (COP)
-                  </label>
-                  <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-amber" />
+                    <Dialog.Title className="font-stencil text-sm sm:text-base text-amber-300 font-bold tracking-wider uppercase">
+                      {editingTransaction
+                        ? 'ESTACIÓN DE RE-FORJADO CONTABLE'
+                        : 'ESTACIÓN DE FUNDICIÓN Y PARTIDA DOBLE'}
+                    </Dialog.Title>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Banco de trabajo industrial • Asiento automático balanceado (Débitos = Créditos)
+                  </p>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      COMISIÓN PLATAFORMA (DESCUENTO)
-                    </label>
-                    <MoneyInput value={commission} onChange={setCommission} placeholder="Opcional" />
-                  </div>
-                  <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      PROPINAS RECIBIDAS
-                    </label>
-                    <MoneyInput value={tip} onChange={setTip} placeholder="Opcional" />
-                  </div>
-                </div>
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-xs bg-[#111f1a] border border-emerald-700/60 text-[10px] font-stencil text-emerald-300">
+                  ⚖️ MOTOR LEDGER ACTIVO
+                </span>
+                <Dialog.Close asChild>
+                  <button
+                    className="p-1.5 rounded-xs text-slate-400 hover:text-slate-100 bg-[#111c18] hover:bg-[#1a2d25] border border-[#264136] hover:border-amber-500/60 transition-colors cursor-pointer"
+                    aria-label="Cerrar modal"
+                  >
+                    <X size={18} />
+                  </button>
+                </Dialog.Close>
+              </div>
+            </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      CATEGORÍA / FUENTE
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
-                        style={selectedCatColor ? { borderColor: `${selectedCatColor}50`, backgroundColor: `${selectedCatColor}18` } : undefined}
-                      >
-                        <CategoryIcon
-                          icon={selectedCat?.icon}
-                          categoryName={selectedCat?.name}
-                          kind="income"
-                          size={18}
-                          color={selectedCatColor}
-                        />
-                      </div>
-                      <select
-                        value={categoryId}
-                        onChange={handleCategoryChange}
-                        required
-                        className="flex-1 bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                      >
-                        {incomeCategories.some((c) => !c.isMoto) && incomeCategories.some((c) => c.isMoto) ? (
-                          <>
-                            <optgroup label="── Personales y Nómina ──">
-                              {incomeCategories.filter((c) => !c.isMoto).map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="── Plataformas y Domicilios ──">
-                              {incomeCategories.filter((c) => c.isMoto).map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name} 🏍️
-                                </option>
-                              ))}
-                            </optgroup>
-                          </>
-                        ) : (
-                          incomeCategories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} {c.isMoto ? '🏍️' : ''}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      BÓVEDA DE DESTINO
-                    </label>
-                    <select
-                      value={accountId}
-                      onChange={(e) => setAccountId(e.target.value)}
-                      required
-                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                    >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name} ({a.kind === 'platform_receivable' ? 'Por cobrar' : 'Disponible'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </>
+            {editingTransaction && (
+              <div className="mt-3 bg-amber-950/40 border border-amber-600/60 text-amber-300 px-3 py-1.5 rounded-xs text-[11px] font-pixel flex items-center justify-between">
+                <span>MODO EDICIÓN: Ref. #{editingTransaction.id.slice(0, 8)}</span>
+                <span className="font-stencil uppercase text-[10px] text-amber-400">
+                  {TRANSACTION_KIND_LABELS[editingTransaction.kind]}
+                </span>
+              </div>
             )}
 
-            {/* FORMULARIO DE GASTO */}
-            {kind === 'expense' && (
-              <>
-                <div>
-                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                    VALOR DEL GASTO (COP)
-                  </label>
-                  <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
-                </div>
+            {/* ===============================================================
+                SELECTOR TÁCTIL DE MODO DE OPERACIÓN (BOTONERA DE PRENSA)
+                =============================================================== */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 my-3.5 bg-[#060a09] p-1.5 rounded-xs border-2 border-[#1f342c] shadow-inner">
+              {(
+                [
+                  {
+                    id: 'income',
+                    label: 'INGRESO',
+                    sub: '+ Entrada',
+                    sprite: 'coins',
+                    activeCls:
+                      'bg-gradient-to-b from-[#152e20] to-[#0c1c13] text-emerald-300 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+                    led: 'bg-emerald-400 shadow-[0_0_6px_#34d399]',
+                  },
+                  {
+                    id: 'expense',
+                    label: 'GASTO',
+                    sub: '− Salida',
+                    sprite: 'parcel',
+                    activeCls:
+                      'bg-gradient-to-b from-[#331510] to-[#1c0b08] text-rose-300 border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.25)]',
+                    led: 'bg-rose-400 shadow-[0_0_6px_#fb7185]',
+                  },
+                  {
+                    id: 'transfer',
+                    label: 'TRANSFERIR',
+                    sub: '⇄ Bóvedas',
+                    sprite: 'conveyor',
+                    activeCls:
+                      'bg-gradient-to-b from-[#10292e] to-[#09181b] text-cyan-300 border-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.25)]',
+                    led: 'bg-cyan-400 shadow-[0_0_6px_#22d3ee]',
+                  },
+                  {
+                    id: 'debt_payment',
+                    label: 'DEUDA',
+                    sub: '⛓ Abonar',
+                    sprite: 'chain',
+                    activeCls:
+                      'bg-gradient-to-b from-[#33220c] to-[#1c1206] text-amber-300 border-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.25)]',
+                    led: 'bg-amber-400 shadow-[0_0_6px_#fbbf24]',
+                  },
+                  {
+                    id: 'loan_given',
+                    label: 'PRESTAR',
+                    sub: '↗ A terceros',
+                    sprite: 'sack',
+                    activeCls:
+                      'bg-gradient-to-b from-[#30190d] to-[#1a0d06] text-orange-300 border-orange-500 shadow-[0_0_12px_rgba(249,115,22,0.25)]',
+                    led: 'bg-orange-400 shadow-[0_0_6px_#fb923c]',
+                  },
+                  {
+                    id: 'loan_repayment',
+                    label: 'COBRAR',
+                    sub: '⚡ Liquidar',
+                    sprite: 'ledger_check',
+                    activeCls:
+                      'bg-gradient-to-b from-[#152e20] to-[#0c1c13] text-emerald-300 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+                    led: 'bg-emerald-400 shadow-[0_0_6px_#34d399]',
+                  },
+                ] as const
+              ).map((tab) => {
+                const isActive = kind === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => handleKindChange(tab.id)}
+                    className={`relative flex flex-col items-center justify-center gap-0.5 py-2 px-1.5 rounded-xs text-[10px] font-stencil uppercase tracking-wider transition-all cursor-pointer border-2 ${
+                      isActive
+                        ? `${tab.activeCls} font-bold`
+                        : 'bg-[#0b1310] text-slate-400 hover:text-slate-200 hover:bg-[#111e19] border-[#192b24]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full absolute top-1.5 right-1.5 ${
+                        isActive ? tab.led : 'bg-slate-700'
+                      }`}
+                    />
+                    <PixelSprite name={tab.sprite} size={18} />
+                    <span className="mt-0.5">{tab.label}</span>
+                    <span className="text-[8px] font-pixel normal-case opacity-75 hidden sm:inline">
+                      {tab.sub}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      CATEGORÍA
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
-                        style={selectedCatColor ? { borderColor: `${selectedCatColor}50`, backgroundColor: `${selectedCatColor}18` } : undefined}
-                      >
-                        <CategoryIcon
-                          icon={selectedCat?.icon}
-                          categoryName={selectedCat?.name}
-                          kind="expense"
-                          size={18}
-                          color={selectedCatColor}
-                        />
-                      </div>
-                      <select
-                        value={categoryId}
-                        onChange={handleCategoryChange}
-                        required
-                        className="flex-1 bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                      >
-                        {expenseCategories.some((c) => !c.isMoto) && expenseCategories.some((c) => c.isMoto) ? (
-                          <>
-                            <optgroup label="── Cotidianos y Personales ──">
-                              {expenseCategories.filter((c) => !c.isMoto).map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="── Taller y Operación Moto ──">
-                              {expenseCategories.filter((c) => c.isMoto).map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name} 🏍️
-                                </option>
-                              ))}
-                            </optgroup>
-                          </>
-                        ) : (
-                          expenseCategories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} {c.isMoto ? '🏍️' : ''}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-                  </div>
+            {errorMessage && (
+              <div className="flex items-start gap-2 bg-rose-950/80 border-2 border-rose-800 text-rose-300 p-2.5 rounded-xs text-xs font-pixel my-3">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-                      <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
-                        MEDIO DE PAGO
+            <form onSubmit={handleSubmit}>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                {/* ===========================================================
+                    COLUMNA IZQUIERDA (7 COLS): MESA DE ENSAMBLAJE Y MANDOS
+                    =========================================================== */}
+                <div className="lg:col-span-7 space-y-3.5 bg-[#080e0c] border-2 border-[#1f342c] rounded-xs p-3.5 sm:p-4">
+                  {/* Fecha y Descripción */}
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                    <div className="sm:col-span-5">
+                      <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                        FECHA DEL ASIENTO
                       </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMethod('account')}
-                          className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
-                            paymentMethod === 'account'
-                              ? 'bg-[#1b2f27] text-emerald-300 border border-emerald-600 font-bold'
-                              : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
-                          }`}
-                        >
-                          Cuenta / Efectivo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMethod('debt')}
-                          className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
-                            paymentMethod === 'debt'
-                              ? 'bg-[#2a1d0b] text-amber-300 border border-amber-600 font-bold'
-                              : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
-                          }`}
-                        >
-                          Tarjeta Crédito
-                        </button>
-                      </div>
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        required
+                        className="w-full bg-[#050908] border-2 border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                      />
                     </div>
-
-                    {paymentMethod === 'account' ? (
-                      <select
-                        value={accountId}
-                        onChange={(e) => setAccountId(e.target.value)}
-                        required
-                        className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                      >
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Disponible'})
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <select
-                        value={debtId}
-                        onChange={(e) => setDebtId(e.target.value)}
-                        required
-                        className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
-                      >
-                        {debts
-                          .filter((d) => d.kind === 'credit_card' || d.status === 'active')
-                          .map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name} ({d.institution || 'Tarjeta'})
-                            </option>
-                          ))}
-                      </select>
-                    )}
+                    <div className="sm:col-span-7">
+                      <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                        DESCRIPCIÓN OPERATIVA
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={
+                          kind === 'expense'
+                            ? isMoto
+                              ? 'Ej. Gasolina Terpel / Repuestos moto'
+                              : 'Ej. Pizza a domicilio / Mercado / Almuerzo'
+                            : kind === 'income'
+                              ? isMoto
+                                ? 'Ej. Turno Rappi / DiDi'
+                                : 'Ej. Quincena nómina fija / Honorarios'
+                              : kind === 'transfer'
+                                ? 'Ej. Traslado a efectivo o ahorros'
+                                : kind === 'debt_payment'
+                                  ? 'Ej. Abono tarjeta / Pago cuota préstamo'
+                                  : kind === 'loan_given'
+                                    ? 'Ej. Préstamo a familiar o amigo'
+                                    : 'Ej. Cobro o abono recibido'
+                        }
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        className="w-full bg-[#050908] border-2 border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+
+                  {/* FORMULARIO DE INGRESO */}
+                  {kind === 'income' && (
+                    <>
+                      <div>
+                        <label className="block text-emerald-300 font-stencil text-[11px] mb-1 tracking-wider uppercase font-bold">
+                          CRISOL DE INGRESO BRUTO (COP)
+                        </label>
+                        <MoneyInput
+                          value={amount}
+                          onChange={setAmount}
+                          required
+                          placeholder="0"
+                          showQuickIngots={true}
+                          quickIngots={[10_000, 20_000, 50_000, 100_000, 500_000]}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                            COMISIÓN PLATAFORMA (DESCUENTO)
+                          </label>
+                          <MoneyInput
+                            value={commission}
+                            onChange={setCommission}
+                            placeholder="Opcional"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                            PROPINAS RECIBIDAS {!editingTransaction && '(MOV. APARTE)'}
+                          </label>
+                          <MoneyInput value={tip} onChange={setTip} placeholder="Opcional" />
+                        </div>
+                      </div>
+
+                      {!editingTransaction && tip > 0 && (
+                        <div className="bg-[#0b1713] border border-emerald-700/70 rounded-xs p-2.5 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-pixel font-bold text-emerald-300 uppercase tracking-wider">
+                              ✨ CREARÁ MOVIMIENTO APARTE «PROPINA» POR +{formatCOP(tip)}
+                            </span>
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 font-pixel text-[10px] mb-1 uppercase tracking-wider">
+                              BÓVEDA DONDE ENTRÓ LA PROPINA (EFECTIVO / BANCO / APP)
+                            </label>
+                            <select
+                              value={tipAccountId || accountId}
+                              onChange={(e) => setTipAccountId(e.target.value)}
+                              className="w-full bg-[#050908] border border-emerald-800/80 rounded-xs p-1.5 text-xs font-pixel text-emerald-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {accounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} — {formatCOP(balances.accountBalance.get(a.id) ?? 0)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        {/* Placas Táctiles de Categoría de Ingreso + Selector Completo */}
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1.5 tracking-wider uppercase font-bold">
+                            PLACA DE CATEGORÍA / FUENTE DE INGRESO
+                          </label>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                            {incomeCategories.slice(0, 6).map((c) => {
+                              const isSel = c.id === categoryId
+                              const cColor = resolveCategoryColor(c.icon, c.name, 'income', c.isMoto)
+                              return (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    sound.playClick()
+                                    setCategoryId(c.id)
+                                    setIsMoto(Boolean(c.isMoto))
+                                  }}
+                                  className={`flex items-center gap-1.5 p-1.5 rounded-xs border text-left transition-all cursor-pointer ${
+                                    isSel
+                                      ? 'bg-[#12261e] border-emerald-500 text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.25)]'
+                                      : 'bg-[#060b09] border-[#1f342c] text-slate-300 hover:border-[#315245]'
+                                  }`}
+                                >
+                                  <CategoryIcon
+                                    icon={c.icon}
+                                    categoryName={c.name}
+                                    kind="income"
+                                    size={14}
+                                    color={cColor}
+                                  />
+                                  <span className="text-[10px] font-pixel font-bold truncate">
+                                    {c.name}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
+                              style={
+                                selectedCatColor
+                                  ? {
+                                      borderColor: `${selectedCatColor}50`,
+                                      backgroundColor: `${selectedCatColor}18`,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <CategoryIcon
+                                icon={selectedCat?.icon}
+                                categoryName={selectedCat?.name}
+                                kind="income"
+                                size={18}
+                                color={selectedCatColor}
+                              />
+                            </div>
+                            <select
+                              value={categoryId}
+                              onChange={handleCategoryChange}
+                              required
+                              className="flex-1 bg-[#050908] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {incomeCategories.some((c) => !c.isMoto) &&
+                              incomeCategories.some((c) => c.isMoto) ? (
+                                <>
+                                  <optgroup label="── Personales y Nómina ──">
+                                    {incomeCategories
+                                      .filter((c) => !c.isMoto)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                  <optgroup label="── Plataformas y Domicilios ──">
+                                    {incomeCategories
+                                      .filter((c) => c.isMoto)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name} 🏍️
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                </>
+                              ) : (
+                                incomeCategories.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name} {c.isMoto ? '🏍️' : ''}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Válvulas Rápidas de Bóveda Destino + Selector */}
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1.5 tracking-wider uppercase font-bold">
+                            VÁLVULA DE BÓVEDA RECEPTORA
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                            {accounts.slice(0, 6).map((a) => {
+                              const bal = balances.accountBalance.get(a.id) ?? 0
+                              const isSel = a.id === accountId
+                              return (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  onClick={() => {
+                                    sound.playClick()
+                                    setAccountId(a.id)
+                                  }}
+                                  className={`p-1.5 rounded-xs border text-left transition-all cursor-pointer ${
+                                    isSel
+                                      ? 'bg-[#12261e] border-emerald-500 text-emerald-200 shadow-sm'
+                                      : 'bg-[#060b09] border-[#1f342c] text-slate-300 hover:border-[#315245]'
+                                  }`}
+                                >
+                                  <div className="text-[10px] font-pixel font-bold truncate">
+                                    {a.name}
+                                  </div>
+                                  <div className="text-[9px] font-mono text-emerald-400 num truncate">
+                                    {formatCOPCompact(bal)}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <select
+                            value={accountId}
+                            onChange={(e) => setAccountId(e.target.value)}
+                            required
+                            className="w-full bg-[#050908] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                          >
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name} ({a.kind === 'platform_receivable' ? 'Por cobrar' : 'Disponible'}) —{' '}
+                                {formatCOP(balances.accountBalance.get(a.id) ?? 0)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* FORMULARIO DE GASTO */}
+                  {kind === 'expense' && (
+                    <>
+                      <div>
+                        <label className="block text-rose-300 font-stencil text-[11px] mb-1 tracking-wider uppercase font-bold">
+                          CRISOL DE IMPORTE DEL GASTO (COP)
+                        </label>
+                        <MoneyInput
+                          value={amount}
+                          onChange={setAmount}
+                          required
+                          placeholder="0"
+                          showQuickIngots={true}
+                          quickIngots={[5_000, 10_000, 20_000, 50_000, 100_000]}
+                        />
+                      </div>
+
+                      <div className="space-y-3">
+                        {/* Placas Táctiles de Categoría de Gasto + Selector Completo */}
+                        <div>
+                          <label className="block text-slate-300 font-pixel text-[11px] mb-1.5 tracking-wider uppercase font-bold">
+                            PLACA DE CATEGORÍA DE CONSUMO
+                          </label>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                            {expenseCategories.slice(0, 6).map((c) => {
+                              const isSel = c.id === categoryId
+                              const cColor = resolveCategoryColor(c.icon, c.name, 'expense', c.isMoto)
+                              return (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    sound.playClick()
+                                    setCategoryId(c.id)
+                                    setIsMoto(Boolean(c.isMoto))
+                                  }}
+                                  className={`flex items-center gap-1.5 p-1.5 rounded-xs border text-left transition-all cursor-pointer ${
+                                    isSel
+                                      ? 'bg-[#2a130f] border-rose-500 text-rose-200 shadow-[0_0_8px_rgba(244,63,94,0.25)]'
+                                      : 'bg-[#060b09] border-[#1f342c] text-slate-300 hover:border-[#315245]'
+                                  }`}
+                                >
+                                  <CategoryIcon
+                                    icon={c.icon}
+                                    categoryName={c.name}
+                                    kind="expense"
+                                    size={14}
+                                    color={cColor}
+                                  />
+                                  <span className="text-[10px] font-pixel font-bold truncate">
+                                    {c.name}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-8 h-8 rounded bg-[#101d18] border border-[#273e34] flex items-center justify-center shrink-0"
+                              style={
+                                selectedCatColor
+                                  ? {
+                                      borderColor: `${selectedCatColor}50`,
+                                      backgroundColor: `${selectedCatColor}18`,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <CategoryIcon
+                                icon={selectedCat?.icon}
+                                categoryName={selectedCat?.name}
+                                kind="expense"
+                                size={18}
+                                color={selectedCatColor}
+                              />
+                            </div>
+                            <select
+                              value={categoryId}
+                              onChange={handleCategoryChange}
+                              required
+                              className="flex-1 bg-[#050908] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {expenseCategories.some((c) => !c.isMoto) &&
+                              expenseCategories.some((c) => c.isMoto) ? (
+                                <>
+                                  <optgroup label="── Cotidianos y Personales ──">
+                                    {expenseCategories
+                                      .filter((c) => !c.isMoto)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                  <optgroup label="── Taller y Operación Moto ──">
+                                    {expenseCategories
+                                      .filter((c) => c.isMoto)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name} 🏍️
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                </>
+                              ) : (
+                                expenseCategories.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name} {c.isMoto ? '🏍️' : ''}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                            <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                              VÁLVULA / MEDIO DE PAGO
+                            </label>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setPaymentMethod('account')}
+                                className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                                  paymentMethod === 'account'
+                                    ? 'bg-[#1b2f27] text-emerald-300 border border-emerald-600 font-bold'
+                                    : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
+                                }`}
+                              >
+                                Cuenta / Efectivo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPaymentMethod('debt')}
+                                className={`text-[10px] font-pixel px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
+                                  paymentMethod === 'debt'
+                                    ? 'bg-[#2a1d0b] text-amber-300 border border-amber-600 font-bold'
+                                    : 'text-slate-400 hover:text-slate-200 border border-transparent hover:bg-[#121c18]'
+                                }`}
+                              >
+                                Tarjeta Crédito
+                              </button>
+                            </div>
+                          </div>
+
+                          {paymentMethod === 'account' ? (
+                            <>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                                {liquidAccounts.slice(0, 6).map((a) => {
+                                  const bal = balances.accountBalance.get(a.id) ?? 0
+                                  const isSel = a.id === accountId
+                                  return (
+                                    <button
+                                      key={a.id}
+                                      type="button"
+                                      onClick={() => {
+                                        sound.playClick()
+                                        setAccountId(a.id)
+                                      }}
+                                      className={`p-1.5 rounded-xs border text-left transition-all cursor-pointer ${
+                                        isSel
+                                          ? 'bg-[#12261e] border-emerald-500 text-emerald-200 shadow-sm'
+                                          : 'bg-[#060b09] border-[#1f342c] text-slate-300 hover:border-[#315245]'
+                                      }`}
+                                    >
+                                      <div className="text-[10px] font-pixel font-bold truncate">
+                                        {a.name}
+                                      </div>
+                                      <div className="text-[9px] font-mono text-emerald-400 num truncate">
+                                        {formatCOPCompact(bal)}
+                                      </div>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <select
+                                value={accountId}
+                                onChange={(e) => setAccountId(e.target.value)}
+                                required
+                                className="w-full bg-[#050908] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                              >
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Disponible'}) —{' '}
+                                    {formatCOP(balances.accountBalance.get(a.id) ?? 0)}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          ) : (
+                            <select
+                              value={debtId}
+                              onChange={(e) => setDebtId(e.target.value)}
+                              required
+                              className="w-full bg-[#050908] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                            >
+                              {debts
+                                .filter((d) => d.kind === 'credit_card' || d.status === 'active')
+                                .map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.name} ({d.institution || 'Tarjeta'})
+                                  </option>
+                                ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
             {/* FORMULARIO DE TRANSFERENCIA ENTRE BÓVEDAS */}
             {kind === 'transfer' && (
@@ -2068,73 +2669,219 @@ export const QuickTransactionModal: React.FC = () => {
                     )}
                   </>
                 )}
-              </>
-            )}
+                  </>
+                )}
 
-            {/* Checkbox de Motocicleta */}
-            {(kind === 'income' ||
-              kind === 'expense' ||
-              (kind === 'loan_repayment' && collectionSource === 'platform')) && (
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="moto-check"
-                  checked={isMoto}
-                  onChange={(e) => setIsMoto(e.target.checked)}
-                  className="rounded-xs border border-[#273e34] text-amber-500 focus:ring-amber-500 bg-[#070c0a] cursor-pointer"
-                />
-                <label
-                  htmlFor="moto-check"
-                  className="text-xs text-slate-300 font-pixel uppercase tracking-wider cursor-pointer select-none font-bold"
-                >
-                  Vincular a la Motocicleta (Taller de Moto)
-                </label>
+                {/* Checkbox de Motocicleta */}
+                {(kind === 'income' ||
+                  kind === 'expense' ||
+                  (kind === 'loan_repayment' && collectionSource === 'platform')) && (
+                  <div className="flex items-center gap-2.5 p-2.5 rounded-xs bg-[#141008] border border-amber-700/60">
+                    <input
+                      type="checkbox"
+                      id="moto-check"
+                      checked={isMoto}
+                      onChange={(e) => setIsMoto(e.target.checked)}
+                      className="rounded-xs border border-amber-600 text-amber-500 focus:ring-amber-500 bg-[#070c0a] cursor-pointer"
+                    />
+                    <label
+                      htmlFor="moto-check"
+                      className="text-xs text-amber-200 font-pixel uppercase tracking-wider cursor-pointer select-none font-bold flex items-center gap-1.5"
+                    >
+                      <PixelSprite name="moto" size={15} />
+                      <span>Vincular a la Motocicleta (Taller Operativo)</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Notas adicionales */}
+                <div>
+                  <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
+                    BITÁCORA / NOTAS ADICIONALES (OPCIONAL)
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Detalles adicionales, número de factura o recordatorio..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full bg-[#050908] border-2 border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
               </div>
-            )}
 
-            {/* Notas adicionales */}
-            <div>
-              <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                NOTAS ADICIONALES (OPCIONAL)
-              </label>
-              <textarea
-                rows={2}
-                placeholder="Detalles adicionales, recordatorio..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
-              />
-            </div>
+              {/* ===========================================================
+                  COLUMNA DERECHA (5 COLS): PRENSA DE PARTIDA DOBLE EN VIVO
+                  =========================================================== */}
+              <div className="lg:col-span-5 flex flex-col justify-between space-y-3.5 bg-[#070d0b] border-2 border-[#29463b] rounded-xs p-4 shadow-inner lg:sticky lg:top-0">
+                <div className="space-y-3.5">
+                  {/* Cabecera de Prensa */}
+                  <div className="flex items-center justify-between pb-2.5 border-b border-[#1e342c]">
+                    <div className="flex items-center gap-2">
+                      <span className="led-pilot led-pilot-online" />
+                      <span className="font-stencil text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                        PRENSA DE PARTIDA DOBLE
+                      </span>
+                    </div>
+                    <span className="badge-pixel text-[9px] bg-[#10201a] text-emerald-300 border-emerald-700/70">
+                      Σ = $0
+                    </span>
+                  </div>
 
-            {/* Botones de acción con calor de forja */}
-            <div className="flex items-center justify-end gap-2.5 pt-3.5 border-t-2 border-[#233a30]">
-              <button
-                type="button"
-                onClick={() => {
-                  sound.playClick()
-                  closeQuickModal()
-                }}
-                disabled={isSubmitting}
-                className="btn-game btn-game-secondary text-xs py-2 px-3.5 font-pixel"
-              >
-                CANCELAR
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={`btn-game btn-game-primary btn-forge-heat text-xs py-2 px-4.5 font-pixel font-bold flex items-center gap-2 shadow-xl transition-all ${
-                  isSubmitting ? 'animate-forge-hot' : ''
-                }`}
-              >
-                <PixelSprite name="tools" size={17} className={isSubmitting ? 'animate-spin' : ''} />
-                <span>
-                  {isSubmitting
-                    ? '¡FORJANDO EN EL YUNQUE!'
-                    : editingTransaction
-                    ? 'GUARDAR MODIFICACIONES'
-                    : 'FORJAR MOVIMIENTO'}
-                </span>
-              </button>
+                  {/* 1. Esquema de Circuito de Recursos: Origen -> Destino */}
+                  <div className="bg-[#050908] border border-[#1d322a] rounded-xs p-3 space-y-2">
+                    <span className="text-[9px] font-stencil text-slate-400 uppercase tracking-wider block">
+                      1. CIRCUITO DE CIRCULACIÓN DE RECURSOS
+                    </span>
+                    <div className="grid grid-cols-11 gap-1.5 items-center">
+                      <div className="col-span-5 p-2 rounded-xs bg-[#0b1411] border border-[#233b31]">
+                        <span className="text-[8px] font-stencil text-slate-400 uppercase block truncate">
+                          {liveBlueprint.sourceTitle}
+                        </span>
+                        <span className="text-[11px] font-pixel font-bold text-slate-100 block truncate mt-0.5">
+                          {liveBlueprint.sourceName}
+                        </span>
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center text-amber-400 font-bold text-xs">
+                        &rarr;
+                      </div>
+                      <div className="col-span-5 p-2 rounded-xs bg-[#101e19] border border-emerald-700/60">
+                        <span className="text-[8px] font-stencil text-emerald-300 uppercase block truncate">
+                          {liveBlueprint.destTitle}
+                        </span>
+                        <span className="text-[11px] font-pixel font-bold text-emerald-200 block truncate mt-0.5">
+                          {liveBlueprint.destName}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Telemetría de Impacto Proyectado en Bóveda / Pasivo */}
+                  <div className="bg-[#050908] border border-[#1d322a] rounded-xs p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-stencil text-slate-400 uppercase tracking-wider">
+                        2. IMPACTO PROYECTADO EN SALDO
+                      </span>
+                      <span className="text-[10px] font-pixel text-amber-300 truncate max-w-[160px]">
+                        {liveBlueprint.vaultLabel}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-xs font-pixel pt-1">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>Saldo antes de forjar:</span>
+                        <span className="font-mono num text-slate-200">
+                          {formatCOP(liveBlueprint.currentBalance)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Variación operativa:</span>
+                        <span
+                          className={`font-mono font-bold num ${
+                            liveBlueprint.tone === 'emerald'
+                              ? 'text-emerald-400'
+                              : liveBlueprint.tone === 'rose'
+                                ? 'text-rose-400'
+                                : 'text-amber-300'
+                          }`}
+                        >
+                          {liveBlueprint.deltaSign}
+                          {formatCOP(liveBlueprint.deltaAmount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-[#182b24] font-bold">
+                        <span className="text-slate-200">Saldo proyectado:</span>
+                        <span
+                          className={`font-mono text-sm num ${
+                            liveBlueprint.projectedBalance < 0
+                              ? 'text-rose-400'
+                              : 'text-emerald-300'
+                          }`}
+                        >
+                          {formatCOP(liveBlueprint.projectedBalance)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Matriz de Asientos en Partida Doble */}
+                  <div className="bg-[#050908] border border-[#1d322a] rounded-xs p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-stencil text-slate-400 uppercase tracking-wider">
+                        3. ASIENTOS CONTABLES A FORJAR
+                      </span>
+                      <span className="text-[9px] font-pixel text-emerald-400">
+                        Débitos = Créditos
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-[#15251f] border border-[#1a2e26] rounded-xs overflow-hidden">
+                      {liveBlueprint.postings.map((p, idx) => (
+                        <div
+                          key={idx}
+                          className="px-2.5 py-1.5 bg-[#09110e] flex items-center justify-between gap-2 text-[11px] font-pixel"
+                        >
+                          <div className="min-w-0">
+                            <span
+                              className={`text-[8px] font-stencil px-1 py-0.2 rounded-xs border mr-1.5 ${
+                                p.isDebit
+                                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700/70'
+                                  : 'bg-cyan-950/90 text-cyan-300 border-cyan-700/70'
+                              }`}
+                            >
+                              {p.role}
+                            </span>
+                            <span className="text-slate-200 truncate">{p.target}</span>
+                          </div>
+                          <span
+                            className={`font-mono font-bold num shrink-0 ${
+                              p.isDebit ? 'text-emerald-300' : 'text-cyan-300'
+                            }`}
+                          >
+                            {p.isDebit ? '+' : '−'}
+                            {formatCOP(p.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mandos de Yunque: Botones de Confirmación */}
+                <div className="pt-3 border-t-2 border-[#233a30] flex flex-col gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className={`w-full btn-game btn-game-primary btn-forge-heat text-xs sm:text-sm py-2.5 px-4 font-stencil font-bold flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer ${
+                      isSubmitting ? 'animate-forge-hot' : ''
+                    }`}
+                  >
+                    <PixelSprite
+                      name="anvil"
+                      size={18}
+                      className={isSubmitting ? 'animate-spin' : ''}
+                    />
+                    <span>
+                      {isSubmitting
+                        ? '¡FORJANDO EN EL YUNQUE!'
+                        : editingTransaction
+                          ? 'GUARDAR MODIFICACIONES'
+                          : '⚡ GOLPEAR YUNQUE Y FORJAR'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playClick()
+                      closeQuickModal()
+                    }}
+                    disabled={isSubmitting}
+                    className="w-full btn-game btn-game-secondary text-xs py-1.5 px-3.5 font-pixel cursor-pointer"
+                  >
+                    CANCELAR OPERACIÓN
+                  </button>
+                </div>
+              </div>
             </div>
           </form>
         </Dialog.Content>

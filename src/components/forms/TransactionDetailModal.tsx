@@ -118,24 +118,36 @@ export const TransactionDetailModal: React.FC = () => {
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/85 backdrop-blur-xs z-[60]" />
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 pointer-events-none">
-          <Dialog.Content className="pointer-events-auto w-full max-w-xl max-h-[92vh] overflow-y-auto forge-modal-box rivet-corners p-4 sm:p-5 shadow-2xl focus:outline-none bg-[#0c1411] border-2 border-[#233a30]">
-            {/* Cabecera */}
+          <Dialog.Content className="pointer-events-auto w-full max-w-2xl max-h-[92vh] overflow-y-auto forge-modal-box rivet-corners p-4 sm:p-6 shadow-2xl focus:outline-none bg-[#0b1310] border-2 border-[#2e4d40]">
+            {/* Cabecera Industrial de Auditoría */}
             <div className="flex items-center justify-between pb-3 border-b-2 border-[#233a30]">
-              <Dialog.Title className="font-stencil text-base text-emerald-400 font-bold flex items-center gap-2.5 tracking-wide">
-                <CategoryIcon
-                  icon={index.categories.get(desc.categoryId || '')?.icon}
-                  categoryName={index.categories.get(desc.categoryId || '')?.name || tx.description}
-                  kind={tx.kind}
-                  isMoto={tx.isMoto}
-                  size={20}
-                  color={index.categories.get(desc.categoryId || '')?.color}
-                />
-                <span>DETALLE DEL MOVIMIENTO</span>
-              </Dialog.Title>
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#11201a] border border-emerald-700/60">
+                  <CategoryIcon
+                    icon={index.categories.get(desc.categoryId || '')?.icon}
+                    categoryName={index.categories.get(desc.categoryId || '')?.name || tx.description}
+                    kind={tx.kind}
+                    isMoto={tx.isMoto}
+                    size={20}
+                    color={index.categories.get(desc.categoryId || '')?.color}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-online" />
+                    <Dialog.Title className="font-stencil text-sm sm:text-base text-emerald-300 font-bold tracking-wider uppercase">
+                      AUDITORÍA DE ASIENTO CONTABLE
+                    </Dialog.Title>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Inspección de partida doble • Ref. #{tx.id.slice(0, 8)}
+                  </p>
+                </div>
+              </div>
               <Dialog.Close asChild>
                 <button
                   onClick={() => sound.playClick()}
-                  className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#1a2d25] border border-transparent hover:border-[#2f5243] transition-colors cursor-pointer"
+                  className="p-1.5 rounded-xs text-slate-400 hover:text-slate-100 bg-[#111c18] hover:bg-[#1a2d25] border border-[#264136] hover:border-amber-500/60 transition-colors cursor-pointer"
                   aria-label="Cerrar detalle"
                 >
                   <X size={18} />
@@ -168,7 +180,7 @@ export const TransactionDetailModal: React.FC = () => {
                       {TRANSACTION_KIND_LABELS[tx.kind]}
                     </span>
                     <div
-                      className={`font-pixel font-bold text-xl sm:text-2xl mt-0.5 ${
+                      className={`font-pixel font-bold num text-xl sm:text-2xl mt-0.5 ${
                         desc.tone === 'income'
                           ? 'text-emerald-400'
                           : desc.tone === 'expense'
@@ -236,13 +248,13 @@ export const TransactionDetailModal: React.FC = () => {
                       {Number(meta.commission || 0) > 0 && (
                         <div>
                           <span className="text-[10px] text-slate-400 font-pixel block">Comisión descontada:</span>
-                          <span className="font-pixel text-rose-300 font-bold">−{formatCOP(Number(meta.commission))}</span>
+                          <span className="font-pixel num text-rose-300 font-bold">−{formatCOP(Number(meta.commission))}</span>
                         </div>
                       )}
                       {Number(meta.tip || 0) > 0 && (
                         <div>
                           <span className="text-[10px] text-slate-400 font-pixel block">Propina recibida:</span>
-                          <span className="font-pixel text-emerald-300 font-bold">+{formatCOP(Number(meta.tip))}</span>
+                          <span className="font-pixel num text-emerald-300 font-bold">+{formatCOP(Number(meta.tip))}</span>
                         </div>
                       )}
                     </>
@@ -252,7 +264,7 @@ export const TransactionDetailModal: React.FC = () => {
                   {tx.kind === 'transfer' && Number(meta.fee || 0) > 0 && (
                     <div>
                       <span className="text-[10px] text-slate-400 font-pixel block">Costo de transferencia:</span>
-                      <span className="font-pixel text-amber-300 font-bold">{formatCOP(Number(meta.fee))}</span>
+                      <span className="font-pixel num text-amber-300 font-bold">{formatCOP(Number(meta.fee))}</span>
                     </div>
                   )}
 
@@ -262,19 +274,19 @@ export const TransactionDetailModal: React.FC = () => {
                       {Number(meta.principal || 0) > 0 && (
                         <div>
                           <span className="text-[10px] text-slate-400 font-pixel block">Abono a capital:</span>
-                          <span className="font-pixel text-emerald-300 font-bold">{formatCOP(Number(meta.principal))}</span>
+                          <span className="font-pixel num text-emerald-300 font-bold">{formatCOP(Number(meta.principal))}</span>
                         </div>
                       )}
                       {Number(meta.interest || 0) > 0 && (
                         <div>
                           <span className="text-[10px] text-slate-400 font-pixel block">Intereses financieros:</span>
-                          <span className="font-pixel text-rose-300 font-bold">{formatCOP(Number(meta.interest))}</span>
+                          <span className="font-pixel num text-rose-300 font-bold">{formatCOP(Number(meta.interest))}</span>
                         </div>
                       )}
                       {Number(meta.fees || 0) > 0 && (
                         <div>
                           <span className="text-[10px] text-slate-400 font-pixel block">Seguros / Cuota manejo:</span>
-                          <span className="font-pixel text-amber-300 font-bold">{formatCOP(Number(meta.fees))}</span>
+                          <span className="font-pixel num text-amber-300 font-bold">{formatCOP(Number(meta.fees))}</span>
                         </div>
                       )}
                     </>
@@ -292,7 +304,7 @@ export const TransactionDetailModal: React.FC = () => {
                   {tx.kind === 'loan_repayment' && Number(meta.interest || 0) > 0 && (
                     <div>
                       <span className="text-[10px] text-slate-400 font-pixel block">Intereses percibidos:</span>
-                      <span className="font-pixel text-emerald-300 font-bold">+{formatCOP(Number(meta.interest))}</span>
+                      <span className="font-pixel num text-emerald-300 font-bold">+{formatCOP(Number(meta.interest))}</span>
                     </div>
                   )}
                 </div>

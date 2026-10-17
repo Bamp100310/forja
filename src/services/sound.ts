@@ -103,6 +103,7 @@ class SoundSystem {
   private muted: boolean
   private volume: number
   private lastTrigger: Record<string, number> = {}
+  private listeners: Set<(muted: boolean) => void> = new Set()
 
   constructor() {
     this.muted = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_MUTED) === 'true' : false
@@ -117,7 +118,25 @@ class SoundSystem {
   setMuted(muted: boolean) {
     this.muted = muted
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_MUTED, String(muted))
+      try {
+        localStorage.setItem(STORAGE_KEY_MUTED, String(muted))
+      } catch {
+        // Ignorar si localStorage está restringido
+      }
+    }
+    this.listeners.forEach((fn) => fn(this.muted))
+  }
+
+  toggleMuted(): boolean {
+    const next = !this.muted
+    this.setMuted(next)
+    return next
+  }
+
+  subscribeMuteChange(listener: (muted: boolean) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
     }
   }
 
@@ -128,8 +147,17 @@ class SoundSystem {
   setVolume(vol: number) {
     this.volume = Math.max(0, Math.min(1, vol))
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_VOLUME, String(this.volume))
+      try {
+        localStorage.setItem(STORAGE_KEY_VOLUME, String(this.volume))
+      } catch {
+        // Ignorar si localStorage está restringido
+      }
     }
+  }
+
+  isReducedMotionPreferred(): boolean {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
   }
 
   private shouldThrottle(type: string, minIntervalMs = 35): boolean {
@@ -156,7 +184,6 @@ class SoundSystem {
       }
       const buffer = sampleBuffers[key]
       if (!buffer) {
-        // Cargar en background para la próxima reproducción y usar fallback inmediato
         loadSampleBuffer(key, ctx).catch(() => {})
         if (fallback) fallback()
         return false
@@ -172,6 +199,14 @@ class SoundSystem {
 
       source.connect(gainNode)
       gainNode.connect(ctx.destination)
+      source.onended = () => {
+        try {
+          source.disconnect()
+          gainNode.disconnect()
+        } catch {
+          // Nodo ya desconectado
+        }
+      }
       source.start(now)
       return true
     } catch {
@@ -182,16 +217,16 @@ class SoundSystem {
 
   /**
    * Clic metálico mecánico: sonido real grabado de percutor de palanca/pestillo metálico.
-   * Cuenta con variación microtonal para que no se sienta repetitivo.
    */
   playClick() {
     if (this.muted || this.volume <= 0 || this.shouldThrottle('click', 25)) return
-    const rate = 0.98 + (Math.random() * 0.08 - 0.04) // Variación sutil ±4%
-    this.playSample('click', 0.85, rate, () => this.synthClick())
+    const rate = 0.98 + (Math.random() * 0.08 - 0.04)
+    this.playSample('click', 0.8, rate, () => this.synthClick())
   }
 
   /**
    * Confirmación / cerrojo pesado: pestillo y muelle de hierro encajando.
+   * Solo debe invocarse tras confirmación de la operación.
    */
   playConfirm() {
     if (this.muted || this.volume <= 0 || this.shouldThrottle('confirm', 45)) return
@@ -199,7 +234,7 @@ class SoundSystem {
   }
 
   /**
-   * Ingreso / cobro: tintineo de monedas de metal y latón.
+   * Ingreso / cobro confirmado: tintineo de monedas de metal y latón.
    */
   playIncome() {
     if (this.muted || this.volume <= 0 || this.shouldThrottle('income', 50)) return
@@ -207,7 +242,7 @@ class SoundSystem {
   }
 
   /**
-   * Gasto / forjado: golpe de martillo de herrero pesado contra metal.
+   * Gasto / forjado confirmado: golpe de martillo de herrero pesado contra metal.
    */
   playExpense() {
     if (this.muted || this.volume <= 0 || this.shouldThrottle('expense', 60)) return
@@ -223,17 +258,44 @@ class SoundSystem {
   }
 
   /**
-   * Golpe de yunque (Easter egg del logo FORJA II y forjado principal):
-   * Muestra real de un yunque de 45 libras golpeado por martillo con armónicos de acero templado.
+   * Golpe de yunque y fragua térmica procedural (Easter egg del logo FORJA III):
+   * Soporta tanto niveles discretos (1..5) como temperatura continua en °C (25..2500°C)
+   * y multiplicador de cadencia.
+   * - Hierro frío (25°C–400°C): impacto metálico agudo y cristalino.
+   * - Hierro al rojo (500°C–1100°C): resonancia armónica cálida + fuelle de fragua.
+   * - Hierro fundido (>1350°C): golpe pesado plástico sobre metal líquido + rugido de crisol.
+   * Nunca reproduce el sonido de confirmación financiera.
    */
-  playAnvilHit(heatLevel = 0) {
-    if (this.muted || this.volume <= 0 || this.shouldThrottle('anvil_hit', 40)) return
-    const rate = 1.0 + heatLevel * 0.03
-    this.playSample('anvil', 0.95, rate, () => this.synthAnvilHit(heatLevel))
+  playAnvilHit(heatInput = 1, cadenceMultiplier = 1) {
+    if (this.muted || this.volume <= 0 || this.shouldThrottle('anvil_hit', 35)) return
+
+    // Normalizar entrada: si es <= 10 es etapa discreta (1..5), si es > 10 es temperatura en °C (25..2500)
+    const normalizedHeat =
+      heatInput <= 10
+        ? Math.max(0, Math.min(1, (heatInput - 1) / 4))
+        : Math.max(0, Math.min(1, (heatInput - 25) / 1600))
+
+    // Micro-variación orgánica por golpe + curva acústica del acero caliente
+    const jitter = (Math.random() - 0.5) * 0.05
+    const cadenceBoost = Math.min(0.14, (cadenceMultiplier - 1) * 0.035)
+    // El acero templado/caliente sube de tono hasta ~800°C y luego se vuelve más denso/pesado al fundirse
+    const thermalCurve =
+      normalizedHeat < 0.65
+        ? normalizedHeat * 0.22
+        : 0.14 - (normalizedHeat - 0.65) * 0.28
+    const rate = Math.max(0.75, Math.min(1.35, 0.96 + thermalCurve + cadenceBoost + jitter))
+
+    const equivalentStage = Math.max(1, Math.min(5, Math.round(1 + normalizedHeat * 4)))
+    this.playSample('anvil', 0.9, rate, () => this.synthAnvilHit(equivalentStage))
+
+    // Añadir soplo térmico de fragua proporcional a la temperatura alcanzada
+    if (normalizedHeat >= 0.15) {
+      this.synthFurnaceBellows(1 + normalizedHeat * 4.5)
+    }
   }
 
   /**
-   * Siseo de templado al enfriar metal ardiente en agua.
+   * Siseo de templado al enfriar metal ardiente en agua (reinicio del estado fundido).
    */
   playQuenchSteam() {
     if (this.muted || this.volume <= 0 || this.shouldThrottle('quench_steam', 100)) return
@@ -243,7 +305,7 @@ class SoundSystem {
       const now = ctx.currentTime
 
       const master = ctx.createGain()
-      master.gain.setValueAtTime(this.volume * 0.55, now)
+      master.gain.setValueAtTime(this.volume * 0.5, now)
       master.connect(ctx.destination)
 
       const noise = ctx.createBufferSource()
@@ -251,19 +313,71 @@ class SoundSystem {
       const filter = ctx.createBiquadFilter()
       filter.type = 'bandpass'
       filter.frequency.setValueAtTime(3200, now)
-      filter.frequency.exponentialRampToValueAtTime(1200, now + 0.6)
+      filter.frequency.exponentialRampToValueAtTime(1100, now + 0.55)
       filter.Q.setValueAtTime(1.5, now)
 
       const g = ctx.createGain()
-      g.gain.setValueAtTime(0.65, now)
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.65)
+      g.gain.setValueAtTime(0.6, now)
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.6)
 
       noise.connect(filter)
       filter.connect(g)
       g.connect(master)
+      noise.onended = () => {
+        try {
+          noise.disconnect()
+          filter.disconnect()
+          g.disconnect()
+          master.disconnect()
+        } catch {
+          // Ignorar
+        }
+      }
 
       noise.start(now)
-      noise.stop(now + 0.7)
+      noise.stop(now + 0.62)
+    } catch {
+      // Audio seguro
+    }
+  }
+
+  private synthFurnaceBellows(heatLevel: number) {
+    try {
+      const ctx = getAudioContext()
+      if (!ctx) return
+      const now = ctx.currentTime
+      const duration = 0.14 + heatLevel * 0.05
+
+      const master = ctx.createGain()
+      master.gain.setValueAtTime(this.volume * (0.12 + heatLevel * 0.045), now)
+      master.connect(ctx.destination)
+
+      const noise = ctx.createBufferSource()
+      noise.buffer = getNoiseBuffer(ctx)
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.setValueAtTime(220 + heatLevel * 95, now)
+      filter.frequency.exponentialRampToValueAtTime(110, now + duration)
+
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.7, now)
+      g.gain.exponentialRampToValueAtTime(0.001, now + duration)
+
+      noise.connect(filter)
+      filter.connect(g)
+      g.connect(master)
+      noise.onended = () => {
+        try {
+          noise.disconnect()
+          filter.disconnect()
+          g.disconnect()
+          master.disconnect()
+        } catch {
+          // Ignorar
+        }
+      }
+      noise.start(now)
+      noise.stop(now + duration + 0.02)
     } catch {
       // Audio seguro
     }

@@ -207,7 +207,7 @@ export const PayrollPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
+    <div className="space-y-6 w-full">
       {/* Cabecera del Módulo de Nómina */}
       <div className="forge-machine-panel rivet-corners p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

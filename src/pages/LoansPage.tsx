@@ -171,7 +171,7 @@ export const LoansPage: React.FC = () => {
                         </span>
                       )}
                       {summary.overpayment > 0 && (
-                        <span className="badge-pixel text-[9px] px-2 py-0.5 bg-amber-950/80 text-amber-300 border-amber-600">
+                        <span className="badge-pixel num text-[9px] px-2 py-0.5 bg-amber-950/80 text-amber-300 border-amber-600">
                           SOBREPAGO: +{formatCOP(summary.overpayment)}
                         </span>
                       )}
@@ -214,7 +214,7 @@ export const LoansPage: React.FC = () => {
                         SALDO PENDIENTE POR COBRAR
                       </span>
                       {summary.overpayment > 0 && (
-                        <span className="text-[10px] font-pixel text-amber-400 font-bold">
+                        <span className="text-[10px] font-pixel num text-amber-400 font-bold">
                           EXCEDENTE: +{formatCOP(summary.overpayment)}
                         </span>
                       )}
@@ -299,18 +299,28 @@ export const LoansPage: React.FC = () => {
       {/* MODAL EDITAR PRÉSTAMO */}
       {editingLoan && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="forge-modal-box rivet-corners max-w-md w-full p-5 border-2 border-purple-800/80 shadow-2xl">
-            <div className="flex items-center justify-between pb-2.5 mb-3 border-b-2 border-[#2b1836]">
-              <div className="flex items-center gap-2">
-                <PixelSprite name="sack" size={20} />
-                <h3 className="font-stencil text-base text-purple-400 font-bold tracking-wide">
-                  MODIFICAR PRÉSTAMO POR COBRAR
-                </h3>
+          <div className="forge-modal-box rivet-corners max-w-xl w-full p-5 sm:p-6 border-2 border-purple-800/80 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b-2 border-[#2b1836]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-xs bg-[#1e1226] border border-purple-700/60">
+                  <PixelSprite name="sack" size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="led-pilot led-pilot-online" />
+                    <h3 className="font-stencil text-base text-purple-400 font-bold tracking-wide">
+                      MODIFICAR PRÉSTAMO POR COBRAR
+                    </h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-pixel">
+                    Estación de cuentas por cobrar y deudores activos
+                  </p>
+                </div>
               </div>
               <button
                 onClick={handleCloseModal}
                 disabled={isSubmitting}
-                className="p-1 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b1836] border border-transparent hover:border-[#4f2963] transition-colors cursor-pointer"
+                className="p-1.5 rounded-xs text-slate-400 hover:text-slate-100 hover:bg-[#2b1836] border border-transparent hover:border-[#4f2963] transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
