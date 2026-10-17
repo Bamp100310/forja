@@ -119,7 +119,8 @@ export function computeBalances(totals: readonly TargetTotal[], index: LedgerInd
   const loanPending = new Map<string, number>()
   let loansPending = 0
   for (const loan of index.loans.values()) {
-    const pending = loanSums.get(loan.id) ?? 0
+    const rawPending = loanSums.get(loan.id) ?? 0
+    const pending = Math.max(0, rawPending)
     loanPending.set(loan.id, pending)
     loansPending += pending
   }
@@ -350,13 +351,19 @@ export function describeTransaction(tx: Transaction, index: LedgerIndex): Transa
         sourceLabel: debtName,
         categoryId: findCategory('expense')?.targetId ?? null,
       }
-    case 'transfer':
+    case 'transfer': {
+      const srcPosting = tx.postings.find((p) => p.targetType === 'account' && p.amount < 0)
+      const dstPosting = tx.postings.find((p) => p.targetType === 'account' && p.amount > 0)
+      const srcName = srcPosting?.targetId ? (index.accounts.get(srcPosting.targetId)?.name ?? 'Origen') : null
+      const dstName = dstPosting?.targetId ? (index.accounts.get(dstPosting.targetId)?.name ?? 'Destino') : null
+      const label = srcName && dstName ? `${srcName} → ${dstName}` : (accountNames.join(' → ') || null)
       return {
         amount: sum((a, t) => t === 'account' && a > 0),
         tone: 'neutral',
-        sourceLabel: accountNames.join(' → ') || null,
+        sourceLabel: label,
         categoryId: null,
       }
+    }
     case 'debt_payment': {
       const loanPosting = tx.postings.find((p) => p.targetType === 'loan' && p.amount < 0)
       const loanFrom = loanPosting?.targetId ? index.loans.get(loanPosting.targetId)?.personName : null

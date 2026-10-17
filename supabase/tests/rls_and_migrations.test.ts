@@ -45,6 +45,10 @@ async function setupTestDb() {
   const migrationSql3 = readFileSync(migrationPath3, 'utf8')
   await db.exec(migrationSql3)
 
+  const migrationPath4 = resolve(process.cwd(), 'supabase/migrations/20261016000000_fix_loan_delete_and_transfers.sql')
+  const migrationSql4 = readFileSync(migrationPath4, 'utf8')
+  await db.exec(migrationSql4)
+
   // Otorgar permisos al rol autenticado sobre el esquema público
   await db.exec(`
     grant usage on schema public to authenticated;
@@ -308,6 +312,19 @@ describe('Integración PostgreSQL + RLS con PGlite', () => {
     // Comprobar totales agregados
     const totals = await db.query(`select * from public.ledger_target_totals where target_id = '${loanUuid}';`)
     expect(Number(totals.rows[0].total)).toBe(87400)
+
+    // Eliminar el préstamo respetando ON DELETE SET NULL (loan_id)
+    await db.query(`delete from public.loans where id = '${loanUuid}';`)
+
+    // Verificar que la transacción existe, con user_id intacto y loan_id en null
+    const txAfter = await db.query(`select * from public.transactions where id = '${txId}';`)
+    expect(txAfter.rows.length).toBe(1)
+    expect(txAfter.rows[0].user_id).toBe(USER_1)
+    expect(txAfter.rows[0].loan_id).toBeNull()
+
+    // Verificar que el préstamo fue eliminado
+    const loanAfter = await db.query(`select * from public.loans where id = '${loanUuid}';`)
+    expect(loanAfter.rows.length).toBe(0)
   })
 
   it('save_transaction_atomic actualiza atómicamente una transacción existente respetando su ID y reemplazando sus asientos', async () => {

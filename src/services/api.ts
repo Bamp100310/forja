@@ -501,13 +501,12 @@ export const forjaApi = {
 
   async deleteDebt(id: string): Promise<void> {
     if (isUsingDemoMode() || !supabase) {
-      const isUsed = inMemoryStore.transactions.some((t) =>
-        t.debtId === id || t.postings.some((p) => p.targetType === 'debt' && p.targetId === id)
-      )
-      if (isUsed) {
-        throw new Error('No se puede eliminar la obligación porque tiene abonos o transacciones registradas. Archívala o liquídala.')
-      }
       inMemoryStore.debts = inMemoryStore.debts.filter((d) => d.id !== id)
+      for (const t of inMemoryStore.transactions) {
+        if (t.debtId === id) {
+          t.debtId = null
+        }
+      }
       inMemoryStore.persist()
       return
     }
@@ -559,13 +558,12 @@ export const forjaApi = {
 
   async deleteLoan(id: string): Promise<void> {
     if (isUsingDemoMode() || !supabase) {
-      const isUsed = inMemoryStore.transactions.some((t) =>
-        t.loanId === id || t.postings.some((p) => p.targetType === 'loan' && p.targetId === id)
-      )
-      if (isUsed) {
-        throw new Error('No se puede eliminar el préstamo porque tiene cobros o movimientos contables asociados.')
-      }
       inMemoryStore.loans = inMemoryStore.loans.filter((l) => l.id !== id)
+      for (const t of inMemoryStore.transactions) {
+        if (t.loanId === id) {
+          t.loanId = null
+        }
+      }
       inMemoryStore.persist()
       return
     }

@@ -48,6 +48,7 @@ export const QuickTransactionModal: React.FC = () => {
     closeQuickModal,
     saveTransaction,
     saveLoan,
+    saveAccount,
     today,
     categories,
     accounts,
@@ -184,6 +185,79 @@ export const QuickTransactionModal: React.FC = () => {
   const isNewLoan =
     kind === 'loan_given' &&
     (loanId === '__new__' || loans.length === 0 || !loans.some((l) => l.id === loanId))
+
+  const cashAccount = useMemo(() => accounts.find((a) => a.kind === 'cash'), [accounts])
+  const bankAccounts = useMemo(
+    () => accounts.filter((a) => a.kind === 'bank' || a.kind === 'wallet' || a.kind === 'savings'),
+    [accounts]
+  )
+  const fromAccount = useMemo(() => accounts.find((a) => a.id === accountId), [accounts, accountId])
+  const toAccount = useMemo(() => accounts.find((a) => a.id === toAccountId), [accounts, toAccountId])
+  const fromBalance = useMemo(
+    () => (fromAccount ? balances.accountBalance.get(fromAccount.id) ?? 0 : 0),
+    [fromAccount, balances.accountBalance]
+  )
+  const toBalance = useMemo(
+    () => (toAccount ? balances.accountBalance.get(toAccount.id) ?? 0 : 0),
+    [toAccount, balances.accountBalance]
+  )
+  const projectedFromBalance = fromBalance - amount - fee
+  const projectedToBalance = toBalance + amount
+  const selectedRepaymentLoan = useMemo(() => loans.find((l) => l.id === loanId), [loans, loanId])
+
+  const [isCreatingCashVault, setIsCreatingCashVault] = useState(false)
+  const handleCreateCashVault = async () => {
+    setIsCreatingCashVault(true)
+    try {
+      const newAccId = await saveAccount({
+        name: 'Efectivo',
+        kind: 'cash',
+        openingBalance: 0,
+        openingDate: today,
+        color: null,
+        notes: 'Bóveda de efectivo para gastos diarios y retiros',
+        isArchived: false,
+        sortOrder: 1,
+      })
+      sound.playConfirm()
+      triggerPixelSparks(window.innerWidth / 2, window.innerHeight * 0.5, 'cyan', 16)
+      setToAccountId(newAccId)
+    } catch (err) {
+      sound.playError()
+      setErrorMessage((err as Error).message || 'Error al crear la bóveda de efectivo')
+    } finally {
+      setIsCreatingCashVault(false)
+    }
+  }
+
+  const handleSwapTransferVaults = () => {
+    sound.playClick()
+    const temp = accountId
+    setAccountId(toAccountId)
+    setToAccountId(temp)
+  }
+
+  const handlePresetWithdrawal = () => {
+    sound.playClick()
+    const bank = bankAccounts[0] || accounts.find((a) => a.kind !== 'cash') || accounts[0]
+    const cash = cashAccount || accounts.find((a) => a.kind === 'cash')
+    if (bank) setAccountId(bank.id)
+    if (cash) {
+      setToAccountId(cash.id)
+      setDescription('Retiro de efectivo')
+    }
+  }
+
+  const handlePresetDeposit = () => {
+    sound.playClick()
+    const bank = bankAccounts[0] || accounts.find((a) => a.kind !== 'cash') || accounts[0]
+    const cash = cashAccount || accounts.find((a) => a.kind === 'cash')
+    if (cash) setAccountId(cash.id)
+    if (bank) {
+      setToAccountId(bank.id)
+      setDescription('Consignación de efectivo')
+    }
+  }
 
   useEffect(() => {
     if (quickModalOpen) {
@@ -392,13 +466,26 @@ export const QuickTransactionModal: React.FC = () => {
         }
 
         if (accounts.length > 0) {
-          const preferredAccount =
-            quickModalKind === 'income'
-              ? quickModalPrefill?.toAccountId || quickModalPrefill?.accountId || accounts[0].id
-              : quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
-          setAccountId(preferredAccount)
-          if (accounts.length > 1 && !quickModalPrefill?.toAccountId) {
-            setToAccountId(accounts[1].id)
+          if (quickModalKind === 'transfer') {
+            const bank = accounts.find((a) => a.kind === 'bank' || a.kind === 'wallet' || a.kind === 'savings')
+            const cash = accounts.find((a) => a.kind === 'cash')
+            const src = quickModalPrefill?.fromAccountId || (bank ? bank.id : accounts[0].id)
+            let dst = quickModalPrefill?.toAccountId || (cash ? cash.id : (accounts[1]?.id || accounts[0].id))
+            if (src === dst && accounts.length > 1) {
+              const alt = accounts.find((a) => a.id !== src)
+              if (alt) dst = alt.id
+            }
+            setAccountId(src)
+            setToAccountId(dst)
+          } else {
+            const preferredAccount =
+              quickModalKind === 'income'
+                ? quickModalPrefill?.toAccountId || quickModalPrefill?.accountId || accounts[0].id
+                : quickModalPrefill?.accountId || quickModalPrefill?.fromAccountId || accounts[0].id
+            setAccountId(preferredAccount)
+            if (accounts.length > 1 && !quickModalPrefill?.toAccountId) {
+              setToAccountId(accounts[1].id)
+            }
           }
         }
         if (debts.length > 0) setDebtId(quickModalPrefill?.debtId || debts[0].id)
@@ -471,6 +558,18 @@ export const QuickTransactionModal: React.FC = () => {
       if (!debtId && debts.length > 0) {
         setDebtId(debts[0].id)
       }
+    } else if (nextKind === 'transfer') {
+      const bank = bankAccounts[0] || accounts.find((a) => a.kind !== 'cash') || accounts[0]
+      const cash = cashAccount || accounts.find((a) => a.kind === 'cash')
+      const src = bank ? bank.id : accounts[0]?.id || ''
+      let dst = cash ? cash.id : (accounts[1]?.id || accounts[0]?.id || '')
+      if (src === dst && accounts.length > 1) {
+        const alt = accounts.find((a) => a.id !== src)
+        if (alt) dst = alt.id
+      }
+      setAccountId(src)
+      setToAccountId(dst)
+      setIsMoto(false)
     }
   }
 
@@ -544,10 +643,23 @@ export const QuickTransactionModal: React.FC = () => {
         if (accountId === toAccountId) {
           throw new Error('La bóveda de origen y la de destino deben ser distintas.')
         }
+        if (fee < 0) {
+          throw new Error('El costo de la comisión bancaria no puede ser negativo.')
+        }
+
+        const srcAcc = accounts.find((a) => a.id === accountId)
+        const dstAcc = accounts.find((a) => a.id === toAccountId)
+        const autoDesc =
+          srcAcc?.kind === 'bank' && dstAcc?.kind === 'cash'
+            ? 'Retiro bancario a efectivo'
+            : srcAcc?.kind === 'cash' && dstAcc?.kind === 'bank'
+            ? 'Consignación de efectivo a banco'
+            : `Traslado de ${srcAcc?.name || 'bóveda'} a ${dstAcc?.name || 'bóveda'}`
+
         op = {
           kind: 'transfer',
           date,
-          description: description.trim() || 'Transferencia entre cuentas',
+          description: description.trim() || autoDesc,
           notes: notes.trim() || null,
           fromAccountId: accountId,
           toAccountId,
@@ -1150,59 +1262,238 @@ export const QuickTransactionModal: React.FC = () => {
               </>
             )}
 
-            {/* FORMULARIO DE TRANSFERENCIA */}
+            {/* FORMULARIO DE TRANSFERENCIA ENTRE BÓVEDAS */}
             {kind === 'transfer' && (
               <>
+                {/* Atajos Rápidos de Transferencia */}
+                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-[#09100d] border border-[#1b2f26] rounded-xs text-[11px] font-pixel">
+                  <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] mr-1">
+                    Atajos rápidos:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handlePresetWithdrawal}
+                    className="btn-game btn-game-secondary text-[10px] py-1 px-2 text-cyan-300 hover:text-cyan-200 cursor-pointer flex items-center gap-1"
+                  >
+                    <PixelSprite name="conveyor" size={13} />
+                    <span>Retirar efectivo (Banco → Efectivo)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePresetDeposit}
+                    className="btn-game btn-game-secondary text-[10px] py-1 px-2 text-emerald-300 hover:text-emerald-200 cursor-pointer flex items-center gap-1"
+                  >
+                    <PixelSprite name="vault" size={13} />
+                    <span>Consignar efectivo (Efectivo → Banco)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSwapTransferVaults}
+                    className="btn-game btn-game-secondary text-[10px] py-1 px-2 text-slate-300 hover:text-white cursor-pointer ml-auto flex items-center gap-1"
+                    title="Invertir bóvedas de origen y destino"
+                  >
+                    <ArrowRightLeft size={12} />
+                    <span>Invertir</span>
+                  </button>
+                </div>
+
+                {!cashAccount && (
+                  <div className="p-2.5 bg-cyan-950/40 border border-cyan-800/80 rounded-xs text-xs font-pixel flex items-center justify-between gap-3">
+                    <div className="text-cyan-300">
+                      <span className="font-bold block">¿No tienes bóveda de efectivo?</span>
+                      <span className="text-[10px] text-slate-300">
+                        Crea tu bóveda de efectivo con un clic para mover dinero entre el banco y tu bolsillo.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isCreatingCashVault}
+                      onClick={handleCreateCashVault}
+                      className="btn-game btn-game-primary text-xs py-1 px-2.5 font-bold shrink-0 cursor-pointer"
+                    >
+                      {isCreatingCashVault ? 'Creando...' : '+ CREAR EFECTIVO'}
+                    </button>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
                     VALOR A TRANSFERIR (COP)
                   </label>
                   <MoneyInput value={amount} onChange={setAmount} required placeholder="0" />
+                  {/* Botones rápidos de incremento */}
+                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-500 font-pixel">Sumar:</span>
+                    {[20_000, 50_000, 100_000, 200_000, 500_000].map((inc) => (
+                      <button
+                        key={inc}
+                        type="button"
+                        onClick={() => setAmount((v) => v + inc)}
+                        className="btn-game btn-game-secondary text-[10px] py-0.5 px-2 font-mono cursor-pointer"
+                      >
+                        +{formatCOPCompact(inc)}
+                      </button>
+                    ))}
+                    {amount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAmount(0)}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-pixel ml-auto cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      BÓVEDA DE ORIGEN
+                      BÓVEDA DE ORIGEN (SALE DINERO)
                     </label>
                     <select
                       value={accountId}
                       onChange={(e) => setAccountId(e.target.value)}
                       required
-                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-cyan-400"
                     >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
+                      {accounts.map((a) => {
+                        const bal = balances.accountBalance.get(a.id) ?? 0
+                        return (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Bóveda'}) — {formatCOP(bal)}
+                          </option>
+                        )
+                      })}
                     </select>
+                    <div className="flex items-center justify-between text-[11px] font-pixel text-slate-400 mt-1 px-0.5">
+                      <span>Saldo disponible:</span>
+                      <span className="text-cyan-300 font-bold font-mono">{formatCOP(fromBalance)}</span>
+                    </div>
                   </div>
+
                   <div>
                     <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                      BÓVEDA DE DESTINO
+                      BÓVEDA DE DESTINO (ENTRA DINERO)
                     </label>
                     <select
                       value={toAccountId}
                       onChange={(e) => setToAccountId(e.target.value)}
                       required
-                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-amber-400"
+                      className="w-full bg-[#070c0a] border border-[#273e34] rounded-xs p-2 text-xs font-pixel text-slate-200 focus:outline-none focus:border-cyan-400"
                     >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
+                      {accounts.map((a) => {
+                        const bal = balances.accountBalance.get(a.id) ?? 0
+                        return (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({ACCOUNT_KIND_LABELS[a.kind] || 'Bóveda'}) — {formatCOP(bal)}
+                          </option>
+                        )
+                      })}
                     </select>
+                    <div className="flex items-center justify-between text-[11px] font-pixel text-slate-400 mt-1 px-0.5">
+                      <span>Saldo actual:</span>
+                      <span className="text-emerald-300 font-bold font-mono">{formatCOP(toBalance)}</span>
+                    </div>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                    COSTO TRANSFERENCIA (COMISIÓN BANCARIA)
+                    COMISIÓN BANCARIA / COSTO TRASLADO (OPCIONAL)
                   </label>
                   <MoneyInput value={fee} onChange={setFee} placeholder="0 si es gratuita" />
+                  <span className="text-[10px] text-slate-500 font-pixel block mt-0.5">
+                    Se registrará como gasto financiero separado sin alterar el importe transferido.
+                  </span>
                 </div>
+
+                {/* Resumen y Conciliación en Tiempo Real */}
+                {amount > 0 && accountId && toAccountId && (
+                  <div className="p-3 bg-[#08120e] border-2 border-cyan-800/70 rounded-xs space-y-2 text-xs font-pixel">
+                    <div className="flex items-center justify-between border-b border-[#1b3127] pb-1">
+                      <span className="font-stencil text-cyan-300 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                        <PixelSprite name="ledger_check" size={14} />
+                        CONCILIACIÓN DEL TRASLADO EN TIEMPO REAL
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Partida Doble Balanceada
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="bg-[#050b08] p-2 rounded border border-[#162720]">
+                        <span className="text-[10px] text-slate-400 uppercase block font-bold">
+                          ORIGEN: {fromAccount?.name || 'Origen'}
+                        </span>
+                        <div className="mt-1 space-y-0.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-400">
+                            <span>Saldo actual:</span>
+                            <span>{formatCOP(fromBalance)}</span>
+                          </div>
+                          <div className="flex justify-between text-rose-400">
+                            <span>Transferencia:</span>
+                            <span>−{formatCOP(amount)}</span>
+                          </div>
+                          {fee > 0 && (
+                            <div className="flex justify-between text-amber-400">
+                              <span>Comisión bancaria:</span>
+                              <span>−{formatCOP(fee)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between pt-1 border-t border-[#1a2d25] font-bold text-slate-100">
+                            <span>Saldo resultante:</span>
+                            <span className={projectedFromBalance < 0 ? 'text-amber-400' : 'text-slate-100'}>
+                              {formatCOP(projectedFromBalance)}
+                            </span>
+                          </div>
+                          {projectedFromBalance < 0 && (
+                            <p className="text-[10px] text-amber-400/90 italic pt-0.5">
+                              ⚠️ Esta operación dejará la cuenta de origen con saldo negativo.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-[#050b08] p-2 rounded border border-[#162720]">
+                        <span className="text-[10px] text-slate-400 uppercase block font-bold">
+                          DESTINO: {toAccount?.name || 'Destino'}
+                        </span>
+                        <div className="mt-1 space-y-0.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-400">
+                            <span>Saldo actual:</span>
+                            <span>{formatCOP(toBalance)}</span>
+                          </div>
+                          <div className="flex justify-between text-emerald-400">
+                            <span>Transferencia recibida:</span>
+                            <span>+{formatCOP(amount)}</span>
+                          </div>
+                          <div className="flex justify-between pt-1 border-t border-[#1a2d25] font-bold text-emerald-300">
+                            <span>Saldo resultante:</span>
+                            <span>{formatCOP(projectedToBalance)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1.5 border-t border-[#182821] flex flex-wrap items-center justify-between text-[10px] text-slate-400">
+                      <span>
+                        Dinero total en ambas bóvedas:{' '}
+                        <span className="text-slate-200 font-bold font-mono">
+                          {formatCOP(fromBalance + toBalance)}
+                        </span>{' '}
+                        →{' '}
+                        <span className="text-cyan-300 font-bold font-mono">
+                          {formatCOP(projectedFromBalance + projectedToBalance)}
+                        </span>{' '}
+                        {fee === 0 ? '(Permanece intacto)' : `(Disminuye solo ${formatCOP(fee)} por comisión)`}
+                      </span>
+                      <span className="text-emerald-400 font-mono">
+                        Ingresos: $0 • Gastos: {fee > 0 ? formatCOP(fee) : '$0'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -1651,10 +1942,18 @@ export const QuickTransactionModal: React.FC = () => {
                               </option>
                               {loans.map((l) => (
                                 <option key={l.id} value={l.id}>
-                                  {l.personName}
+                                  {l.personName} (Saldo por cobrar: {formatCOP(balances.loanPending.get(l.id) ?? 0)})
                                 </option>
                               ))}
                             </select>
+                            {selectedRepaymentLoan && (
+                              <div className="flex items-center justify-between text-[11px] font-pixel text-slate-400 mt-1 px-0.5">
+                                <span>Saldo pendiente:</span>
+                                <span className="text-purple-300 font-bold font-mono">
+                                  {formatCOP(balances.loanPending.get(selectedRepaymentLoan.id) ?? 0)}
+                                </span>
+                              </div>
+                            )}
                           </div>
                           <div>
                             <div className="flex items-center justify-between mb-1">
@@ -1737,10 +2036,26 @@ export const QuickTransactionModal: React.FC = () => {
                         )}
 
                         <div>
-                          <label className="block text-slate-300 font-pixel text-[11px] mb-1 tracking-wider uppercase font-bold">
-                            CAPITAL DEVUELTO (REDUCE SALDO)
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-slate-300 font-pixel text-[11px] tracking-wider uppercase font-bold">
+                              CAPITAL DEVUELTO (REDUCE SALDO)
+                            </label>
+                            {selectedRepaymentLoan && (balances.loanPending.get(selectedRepaymentLoan.id) ?? 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setPrincipal(balances.loanPending.get(selectedRepaymentLoan.id) ?? 0)}
+                                className="text-[10px] font-pixel text-purple-300 hover:text-purple-200 underline cursor-pointer"
+                              >
+                                Liquidar saldo ({formatCOPCompact(balances.loanPending.get(selectedRepaymentLoan.id) ?? 0)})
+                              </button>
+                            )}
+                          </div>
                           <MoneyInput value={principal} onChange={setPrincipal} required placeholder="0" />
+                          {selectedRepaymentLoan && principal > (balances.loanPending.get(selectedRepaymentLoan.id) ?? 0) && (
+                            <div className="p-2 bg-amber-950/40 border border-amber-800/60 rounded text-[10px] text-amber-300 font-mono mt-1">
+                              ⚠️ Este abono supera el saldo pendiente (+{formatCOP(principal - (balances.loanPending.get(selectedRepaymentLoan.id) ?? 0))} excedente). El préstamo quedará en $0 y se registrará un sobrepago a favor del deudor.
+                            </div>
+                          )}
                         </div>
 
                         <div>

@@ -263,6 +263,17 @@ export const AppLayout: React.FC = () => {
               <PixelSprite name="jerrycan" size={15} />
               <span>+ GASTO</span>
             </button>
+            <button
+              onClick={(e) => {
+                sound.playClick()
+                triggerButtonSparks(e, 'cyan', 14)
+                openQuickModal('transfer')
+              }}
+              className="btn-game btn-game-secondary btn-forge-heat text-xs py-1.5 px-3 text-cyan-400 hover:text-cyan-300 cursor-pointer font-pixel font-bold flex items-center gap-1.5"
+            >
+              <PixelSprite name="conveyor" size={15} />
+              <span>+ TRANSFERIR</span>
+            </button>
             {isModuleActive('debts_loans') && (
               <button
                 onClick={(e) => {

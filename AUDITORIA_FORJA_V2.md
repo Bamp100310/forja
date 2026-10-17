@@ -313,3 +313,160 @@ dist/assets/index-DvP6lWuj.js                                  722.12 kB │ gzi
 - **Interfaz de usuario:**
   - En `QuickTransactionModal` (pestaña "Abonar Deuda" y "Cobrar Préstamo"), se agregó un selector conmutador entre "Bóveda / Cuenta Bancaria" y "Cruzar préstamo por cobrar / Compensar", con cálculo automático del saldo restante y ayuda visual del cruce.
 
+---
+
+## 13. Auditoría de Préstamos, Integridad Contable de `user_id` y Transferencias entre Bóvedas
+
+**Fecha:** 16 de Octubre de 2026  
+**Alcance Técnico:**
+1. Corrección del error `null value in column "user_id" of relation "transactions" violates not-null constraint` al eliminar préstamos.
+2. Auditoría y resolución de la discrepancia de saldo de −$27.400 en préstamos pagados y modelado de sobrepagos.
+3. Implementación de la operación de Transferencia entre Bóvedas (bancos, efectivo, billeteras) con simulación en tiempo real y preservación de partida doble.
+
+---
+
+### 13.1 Causa Raíz del Error `transactions.user_id` al Eliminar Préstamos
+
+#### Diagnóstico
+Al intentar eliminar un registro de préstamo en la base de datos, PostgreSQL abortaba la transacción con el error:
+`null value in column "user_id" of relation "transactions" violates not-null constraint`
+
+Rastreando la definición de las tablas en la migración base `supabase/migrations/20261011000000_init_forja.sql`:
+```sql
+alter table public.transactions
+  add constraint transactions_loan_id_user_id_fkey
+  foreign key (loan_id, user_id)
+  references public.loans(id, user_id)
+  on delete set null;
+```
+
+#### Causa Raíz
+En el estándar SQL y en la implementación de PostgreSQL, cuando una clave foránea está compuesta por múltiples columnas (`loan_id, user_id`) y se especifica la cláusula genérica `ON DELETE SET NULL`, **el motor intenta poner en `NULL` todas las columnas que conforman la clave foránea**.
+Por consiguiente, al borrar una fila en `loans`, PostgreSQL intentaba ejecutar internamente:
+`UPDATE transactions SET loan_id = NULL, user_id = NULL WHERE loan_id = ...`
+Dado que `transactions.user_id` posee una restricción obligatoria `NOT NULL` (fundamental para el aislamiento multitenant y las políticas de RLS), la base de datos rechazaba la operación inmediatamente.
+El mismo problema latente existía en las claves foráneas compuestas de `debts` (`transactions_debt_id_user_id_fkey`) y de `recurring_expenses`.
+
+#### Corrección Implementada
+1. **Migración SQL Versionada (`supabase/migrations/20261016000000_fix_loan_delete_and_transfers.sql`):**
+   PostgreSQL 15+ permite especificar explícitamente cuáles columnas de la clave foránea compuesta deben anularse en cascada mediante la sintaxis:
+   `ON DELETE SET NULL (loan_id)`
+   Se reemplazaron las restricciones afectadas:
+   ```sql
+   ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_loan_id_user_id_fkey;
+   ALTER TABLE public.transactions
+     ADD CONSTRAINT transactions_loan_id_user_id_fkey
+     FOREIGN KEY (loan_id, user_id)
+     REFERENCES public.loans(id, user_id)
+     ON DELETE SET NULL (loan_id);
+   ```
+   De este modo, al borrar un préstamo, el campo `loan_id` de los movimientos históricos pasa a `NULL` sin tocar jamás el `user_id`, conservando intacta la pertenencia, el historial y las políticas de RLS.
+2. **Servicio API en Cliente (`src/services/api.ts`):**
+   En el método `deleteLoan(id)` y `deleteDebt(id)`, para el modo local/demo se implementó la misma regla de negocio: se disocia `loanId = null` en las transacciones asociadas sin eliminarlas ni corromper su propietario ni sus asientos contables.
+
+---
+
+### 13.2 Auditoría y Corrección de la Discrepancia del Saldo de −$27.400
+
+#### Problema Observado
+Un préstamo figuraba en la interfaz con saldo `-$27.400`, a pesar de que el libro de movimientos indicaba que ya estaba completamente saldado y debía reflejar un saldo de cero.
+
+#### Auditoría Contable y del Código
+1. **Inspección de la Fórmula:** En `src/domain/loans.ts`, la función `summarizeLoan` calculaba el saldo como:
+   `const pending = Math.round(lent - repaid)`
+   Si un deudor abonaba un monto superior al capital inicialmente prestado (por ejemplo: préstamo inicial de $100.000 y devoluciones acumuladas por $127.400), `pending` tomaba el valor negativo `-27400`.
+2. **Impacto en Agregados Patrimoniales:** En `src/domain/ledger/aggregate.ts`, `computeBalances` realizaba:
+   `loansPending += pending`
+   Al sumar un valor negativo, restaba indebidamente activos al patrimonio neto del usuario (`netWorth`), cuando un crédito por cobrar nunca puede constituir un activo negativo.
+3. **Naturaleza Financiera:** En contabilidad de partida doble, una cuenta por cobrar (activo) se extingue cuando llega a cero. Si el prestatario entrega dinero en exceso:
+   - El saldo por cobrar exigible es **$0**.
+   - El excedente recibido ($27.400) no es un "saldo negativo por cobrar", sino un **Sobrepago** o saldo acreedor a favor del deudor (un pasivo/responsabilidad con él hasta que se reembolse o se compense).
+
+#### Corrección Implementada
+1. **Capa de Dominio (`src/domain/loans.ts`):**
+   - Se reestructuró la interfaz `LoanSummary` y `LoanHistoryEntry` incorporando los conceptos formales:
+     ```typescript
+     const netBalance = lent - repaid
+     const pending = Math.max(0, netBalance)       // Estrictamente 0 si está pagado o sobrepagado
+     const overpayment = Math.max(0, -netBalance)  // Excedente reconocido explícitamente
+     ```
+   - El estado del préstamo (`status`) pasa a `'pagado'` si `repaid > 0 && netBalance <= 0`.
+2. **Capa del Motor Contable (`src/domain/ledger/aggregate.ts`):**
+   - En `computeBalances`, el agregado `loansPending` calcula `Math.max(0, rawPending)`, garantizando que ningún sobrepago individual distorsione el capital activo por recuperar ni el patrimonio.
+3. **Capa de Presentación (`src/pages/LoansPage.tsx`):**
+   - Si `summary.overpayment > 0`, la tarjeta del préstamo muestra `SALDO PENDIENTE: $0` con estado `PAGADO`, complementado con una insignia pixel art `SOBREPAGO: +$27.400` y una nota aclaratoria:
+     *"Préstamo totalmente liquidado en el libro contable ($0). Los abonos registrados superaron el capital prestado en $27.400 (saldo a favor del deudor)."*
+4. **Prevención en Entrada de Datos (`QuickTransactionModal.tsx`):**
+   - Al seleccionar un deudor para registrar un abono, se exhibe su saldo pendiente real y un botón para liquidar el saldo exacto. Si el usuario ingresa un abono mayor, se muestra una advertencia en tiempo real alertando del sobrepago resultante.
+
+---
+
+### 13.3 Nueva Funcionalidad: Transferencias entre Bóvedas
+
+Se implementó el flujo integral para trasladar dinero entre bóvedas del usuario (por ejemplo, retirar efectivo del banco o consignar efectivo en ventanilla/corresponsal) sin alterar los ingresos ni los gastos del periodo.
+
+#### Reglas Contables y de Negocio Garantizadas
+1. **Operación Unitaria de Partida Doble:** Se ejecuta como una única transacción de tipo `'transfer'`.
+2. **Asientos Contables Equilibrados:**
+   - Débito a Bóveda Destino: `line('account', toAccountId, amount, 'transfer')` (+monto)
+   - Crédito a Bóveda Origen: `line('account', fromAccountId, -(amount + fee), 'transfer')` (-(monto + comisión))
+   - Si existe comisión bancaria (`fee > 0`): `line('category', financial_fees, fee, 'fee')` (+comisión)
+   - $\sum \text{Postings} = 0$.
+3. **Impacto en Resultados:** Ingresos = $0$, Gastos = $0$ (o únicamente el valor de la comisión bancaria).
+4. **Invariante Patrimonial:** La suma disponible combinada entre ambas bóvedas no cambia ($\Delta \text{Total} = -\text{fee}$).
+
+#### Experiencia de Usuario (UI Industrial Pixel Art)
+- **Acceso Rápido Global:** Botón `+ TRANSFERIR` incorporado en la cabecera superior de `AppLayout.tsx` y en el centro de tesorería de `AccountsPage.tsx`.
+- **Botones de Atajo Rápido:**
+  - `Retirar efectivo (Banco → Efectivo)`: Selecciona automáticamente el banco como origen y la bóveda de efectivo como destino.
+  - `Consignar efectivo (Efectivo → Banco)`: Invierte la selección para depositar efectivo en cuenta.
+  - `Invertir sentido`: Conmuta origen y destino con un solo clic.
+- **Creación en un Clic de Bóveda de Efectivo:** Si el usuario no tiene una cuenta de tipo `cash`, la interfaz le ofrece crearla al instante con saldo inicial en $0.
+- **Selectores de Bóveda con Saldo en Vivo:** Muestra el nombre, tipo de cuenta y su saldo actual disponible (`formatCOP`).
+- **Simulación y Conciliación en Tiempo Real (Live Preview Card):**
+  - Muestra el saldo actual, el débito/crédito y el saldo proyectado de ambas cuentas.
+  - Alerta visual en color ámbar si la cuenta de origen quedará con saldo negativo.
+  - Verifica el total combinado antes y después.
+- **Historial y Detalle:** En `TransactionsPage.tsx` y `TransactionDetailModal.tsx`, se identifica claramente el flujo como `"Bóveda Origen → Bóveda Destino"`.
+
+---
+
+### 13.4 Resumen de Archivos Modificados
+
+| Archivo | Naturaleza del Cambio |
+|---|---|
+| `supabase/migrations/20261016000000_fix_loan_delete_and_transfers.sql` | Migración SQL que corrige `ON DELETE SET NULL (loan_id)` en claves foráneas compuestas de PostgreSQL. |
+| `supabase/tests/rls_and_migrations.test.ts` | Suite de integración con PGlite verificando la migración 4 y la eliminación no destructiva de préstamos con RLS. |
+| `src/domain/loans.ts` | Refactorización de `summarizeLoan` para soportar `overpayment`, `netBalance` y piso de `pending = 0`. |
+| `src/domain/loans.test.ts` | Pruebas unitarias de préstamos: sin pagos, abonos parciales, pagado total, sobrepago de -$27.400, edición/eliminación y activo vs pasivo. |
+| `src/domain/ledger/aggregate.ts` | Piso no negativo en `computeBalances` para `loansPending` y formato unívoco de `sourceLabel` en transferencias. |
+| `src/domain/ledger/operations.test.ts` | Pruebas contables de partida doble para Ejemplo A (retiro), Ejemplo B (consignación), comisiones e invariantes. |
+| `src/services/api.ts` | Desvinculación segura de `loanId` en transacciones al eliminar préstamos en modo demo/mock. |
+| `src/pages/LoansPage.tsx` | Visualización de insignias de sobrepago, nota explicativa de saldo saldado y feedback de eliminación. |
+| `src/components/forms/QuickTransactionModal.tsx` | Formulario completo de transferencias con atajos, creación de efectivo, selectores con saldo y conciliación en vivo. |
+| `src/components/layout/AppLayout.tsx` | Botón de acción rápida `+ TRANSFERIR` en la barra de navegación superior. |
+
+---
+
+### 13.5 Resultados de Pruebas y Validación Técnica
+
+- **Pruebas Automatizadas (Vitest + PGlite):**
+  - **112 / 112 pruebas exitosas** en 12 suites (100% passing).
+  - Incluye las 45 pruebas contables fundamentales previas + 10 pruebas de integración PostgreSQL/RLS con PGlite + 7 pruebas de transferencias y sobrepago añadidas.
+- **Linter (ESLint):**
+  - **0 errores, 0 advertencias**.
+- **Compilación de Producción (Vite + TypeScript):**
+  - `tsc -b && vite build` finalizado exitosamente en 12.69s generando el bundle de producción sin fallos de tipos.
+- **Pruebas de Interfaz de Usuario en Navegador:**
+  - Verificada la apertura del modal con `+ TRANSFERIR`, cálculo reactivo de la tarjeta de conciliación, atajos y visualización de préstamos.
+
+---
+
+### 13.6 Instrucciones para el Despliegue en Producción
+
+1. **Migración en Supabase Producción:**
+   Ejecutar la migración `supabase/migrations/20261016000000_fix_loan_delete_and_transfers.sql` en el SQL Editor del dashboard de Supabase (o mediante Supabase CLI) para actualizar las restricciones de clave foránea en la base de datos de producción.
+2. **Conciliación de Datos Reales:**
+   No se realizaron reparaciones destructivas ni modificaciones arbitrarias sobre los registros existentes en producción. El sistema ahora reconoce adecuadamente el sobrepago de $27.400 si dicho abono fue real; si se debió a un registro duplicado en el libro, el usuario puede eliminar ese movimiento específico de forma segura desde el historial sin provocar errores de integridad.
+
+

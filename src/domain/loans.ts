@@ -18,17 +18,27 @@ export interface LoanHistoryEntry {
   lent: number
   repaid: number
   interest: number
+  /** Saldo pendiente por cobrar tras este movimiento (>= 0). */
   pendingAfter: number
+  /** Sobrepago acumulado tras este movimiento si el deudor entregó más del capital (>= 0). */
+  overpaymentAfter: number
+  /** Saldo contable neto (lent - repaid). */
+  netBalanceAfter: number
 }
 
 export interface LoanSummary {
   lent: number
   repaid: number
+  /** Saldo pendiente por cobrar (>= 0). Conforme a reglas contables, un préstamo saldado es estrictamente 0. */
   pending: number
+  /** Sobrepago real acumulado en favor del deudor cuando las devoluciones superan el capital prestado. */
+  overpayment: number
+  /** Saldo contable neto sin truncar (lent - repaid), negativo si existe sobrepago. */
+  netBalance: number
   interestReceived: number
   status: LoanStatus
   daysToDue: number | null
-  /** Vence en 7 días o menos y aún hay saldo. */
+  /** Vence en 7 días o menos y aún hay saldo pendiente por cobrar. */
   dueSoon: boolean
   history: LoanHistoryEntry[]
 }
@@ -44,8 +54,9 @@ export function summarizeLoan(loan: Loan, transactions: readonly Transaction[], 
   let lent = 0
   let repaid = 0
   let interestReceived = 0
-  let pending = 0
+  let netAccumulated = 0
   const history: LoanHistoryEntry[] = []
+
   for (const tx of related) {
     let txLent = 0
     let txRepaid = 0
@@ -61,7 +72,11 @@ export function summarizeLoan(loan: Loan, transactions: readonly Transaction[], 
     lent += txLent
     repaid += txRepaid
     interestReceived += txInterest
-    pending += txLent - txRepaid
+    netAccumulated += txLent - txRepaid
+
+    const stepPending = Math.max(0, netAccumulated)
+    const stepOverpayment = Math.max(0, -netAccumulated)
+
     history.push({
       transactionId: tx.id,
       date: tx.date,
@@ -69,13 +84,19 @@ export function summarizeLoan(loan: Loan, transactions: readonly Transaction[], 
       lent: txLent,
       repaid: txRepaid,
       interest: txInterest,
-      pendingAfter: pending,
+      pendingAfter: stepPending,
+      overpaymentAfter: stepOverpayment,
+      netBalanceAfter: netAccumulated,
     })
   }
 
+  const netBalance = lent - repaid
+  const pending = Math.max(0, netBalance)
+  const overpayment = Math.max(0, -netBalance)
+
   const daysToDue = loan.dueDate ? daysBetween(today, loan.dueDate) : null
   let status: LoanStatus
-  if (lent > 0 && pending <= 0) status = 'pagado'
+  if (repaid > 0 && netBalance <= 0) status = 'pagado'
   else if (daysToDue !== null && daysToDue < 0) status = 'vencido'
   else if (repaid > 0) status = 'parcial'
   else status = 'vigente'
@@ -84,6 +105,8 @@ export function summarizeLoan(loan: Loan, transactions: readonly Transaction[], 
     lent,
     repaid,
     pending,
+    overpayment,
+    netBalance,
     interestReceived,
     status,
     daysToDue,

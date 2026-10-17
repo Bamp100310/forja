@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { computeBalances, summarizeTransactions, totalsFromTransactions } from './aggregate'
+import { buildLedgerIndex, computeBalances, summarizeTransactions, totalsFromTransactions } from './aggregate'
 import { OperationError, buildTransactionDraft } from './operations'
-import { accounts, catId, categories, makeIndex, tx } from '../../test/fixtures'
+import { accounts, catId, categories, debts, loans, makeIndex, tx } from '../../test/fixtures'
 import type { Transaction } from '../types'
 
 const index = makeIndex()
@@ -131,6 +131,123 @@ describe('Reglas contables — partida doble', () => {
     expect(s.summary.expense).toBe(0)
     expect(s.summary.cashFlow).toBe(0)
     expect(s.balances.netWorth).toBe(base.balances.netWorth)
+  })
+
+  it('Ejemplo A — retirar efectivo: banco $500.000 -> $400.000, efectivo $20.000 -> $120.000, total $520.000, ingresos $0, gastos $0', () => {
+    // Configurar cuentas iniciales: banco con $500.000 y efectivo con $20.000
+    const accountsCustom = [
+      { id: 'banco-ejemplo', name: 'Bóveda Bancaria', kind: 'bank' as const, openingBalance: 500_000, openingDate: '2026-09-01', sortOrder: 1, isArchived: false, color: null, notes: null },
+      { id: 'efectivo-ejemplo', name: 'Bóveda Efectivo', kind: 'cash' as const, openingBalance: 20_000, openingDate: '2026-09-01', sortOrder: 2, isArchived: false, color: null, notes: null },
+    ]
+    const customIndex = buildLedgerIndex({ accounts: accountsCustom, categories, debts, loans })
+
+    // Transferencia de $100.000 desde bóveda bancaria hacia bóveda de efectivo
+    const txTransfer = tx({
+      kind: 'transfer',
+      date: '2026-09-25',
+      description: 'Retiro de efectivo del cajero',
+      fromAccountId: 'banco-ejemplo',
+      toAccountId: 'efectivo-ejemplo',
+      amount: 100_000,
+    })
+
+    const totals = totalsFromTransactions([txTransfer])
+    const balances = computeBalances(totals, customIndex)
+    const summary = summarizeTransactions([txTransfer], customIndex, range)
+
+    // Verificaciones exactas del Ejemplo A:
+    expect(balances.accountBalance.get('banco-ejemplo')).toBe(400_000)
+    expect(balances.accountBalance.get('efectivo-ejemplo')).toBe(120_000)
+    // Dinero total entre las dos bóvedas: permanece en $520.000
+    expect(balances.available).toBe(520_000)
+    // Ingresos contabilizados por esta operación: $0
+    expect(summary.income).toBe(0)
+    // Gastos contabilizados por esta operación: $0
+    expect(summary.expense).toBe(0)
+    // Partida doble perfectamente equilibrada
+    const debitsSum = txTransfer.postings.filter(p => p.amount > 0).reduce((acc, p) => acc + p.amount, 0)
+    const creditsSum = txTransfer.postings.filter(p => p.amount < 0).reduce((acc, p) => acc + p.amount, 0)
+    expect(debitsSum + creditsSum).toBe(0)
+  })
+
+  it('Ejemplo B — consignar efectivo: efectivo disminuye $80.000, banco aumenta $80.000, total permanece intacto', () => {
+    const accountsCustom = [
+      { id: 'banco-b', name: 'Bóveda Bancaria', kind: 'bank' as const, openingBalance: 400_000, openingDate: '2026-09-01', sortOrder: 1, isArchived: false, color: null, notes: null },
+      { id: 'efectivo-b', name: 'Bóveda Efectivo', kind: 'cash' as const, openingBalance: 120_000, openingDate: '2026-09-01', sortOrder: 2, isArchived: false, color: null, notes: null },
+    ]
+    const customIndex = buildLedgerIndex({ accounts: accountsCustom, categories, debts, loans })
+
+    // Consignación de $80.000 desde efectivo hacia banco
+    const txConsign = tx({
+      kind: 'transfer',
+      date: '2026-09-25',
+      description: 'Consignación en corresponsal bancario',
+      fromAccountId: 'efectivo-b',
+      toAccountId: 'banco-b',
+      amount: 80_000,
+    })
+
+    const totals = totalsFromTransactions([txConsign])
+    const balances = computeBalances(totals, customIndex)
+    const summary = summarizeTransactions([txConsign], customIndex, range)
+
+    expect(balances.accountBalance.get('efectivo-b')).toBe(40_000)
+    expect(balances.accountBalance.get('banco-b')).toBe(480_000)
+    expect(balances.available).toBe(520_000) // Total dinero disponible intacto
+    expect(summary.income).toBe(0)
+    expect(summary.expense).toBe(0)
+  })
+
+  it('transferencia con comisión bancaria: comisión registrada como gasto financiero explícito sin alterar el importe transferido', () => {
+    const txWithFee = tx({
+      kind: 'transfer',
+      date: '2026-09-25',
+      description: 'Transferencia interbancaria con costo',
+      fromAccountId: 'acc-bank',
+      toAccountId: 'acc-cash',
+      amount: 100_000,
+      fee: 5_500,
+    })
+
+    const s = state([txWithFee])
+    // Origen disminuye monto transferido + comisión: 1_000_000 - 105_500 = 894_500
+    expect(s.balances.accountBalance.get('acc-bank')).toBe(894_500)
+    // Destino recibe monto exacto transferido: 300_000 + 100_000 = 400_000
+    expect(s.balances.accountBalance.get('acc-cash')).toBe(400_000)
+    // El gasto financiero es exactamente la comisión
+    expect(s.summary.expense).toBe(5_500)
+    expect(s.summary.financialCosts).toBe(5_500)
+    expect(s.summary.income).toBe(0)
+  })
+
+  it('valida que la cuenta de origen y destino no pueden ser iguales y monto debe ser positivo', () => {
+    expect(() =>
+      buildTransactionDraft(
+        {
+          kind: 'transfer',
+          date: '2026-09-25',
+          description: 'Misma cuenta',
+          fromAccountId: 'acc-bank',
+          toAccountId: 'acc-bank',
+          amount: 50_000,
+        },
+        { categories }
+      )
+    ).toThrow('La cuenta de origen y la de destino deben ser distintas.')
+
+    expect(() =>
+      buildTransactionDraft(
+        {
+          kind: 'transfer',
+          date: '2026-09-25',
+          description: 'Monto negativo',
+          fromAccountId: 'acc-bank',
+          toAccountId: 'acc-cash',
+          amount: -50_000,
+        },
+        { categories }
+      )
+    ).toThrow('El valor transferido debe ser un valor entero mayor que cero.')
   })
 
   it('intereses cobrados en la tarjeta son gasto una sola vez, aunque luego se paguen', () => {

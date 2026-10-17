@@ -170,6 +170,11 @@ export const LoansPage: React.FC = () => {
                           ARCHIVADO
                         </span>
                       )}
+                      {summary.overpayment > 0 && (
+                        <span className="badge-pixel text-[9px] px-2 py-0.5 bg-amber-950/80 text-amber-300 border-amber-600">
+                          SOBREPAGO: +{formatCOP(summary.overpayment)}
+                        </span>
+                      )}
                       <span
                         className={`badge-pixel text-[9px] px-2 py-0.5 ${
                           summary.status === 'pagado'
@@ -204,12 +209,24 @@ export const LoansPage: React.FC = () => {
 
                   {/* Saldo pendiente */}
                   <div className="bg-[#0b1311] border border-[#1e342c] p-3 rounded">
-                    <span className="text-[10px] text-slate-400 font-pixel uppercase tracking-wider block">
-                      SALDO PENDIENTE POR COBRAR
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-pixel uppercase tracking-wider block">
+                        SALDO PENDIENTE POR COBRAR
+                      </span>
+                      {summary.overpayment > 0 && (
+                        <span className="text-[10px] font-pixel text-amber-400 font-bold">
+                          EXCEDENTE: +{formatCOP(summary.overpayment)}
+                        </span>
+                      )}
+                    </div>
                     <div className="font-pixel font-bold num text-2xl text-purple-300 tracking-tight mt-0.5">
                       {formatCOP(summary.pending)}
                     </div>
+                    {summary.overpayment > 0 && (
+                      <p className="text-[11px] text-amber-300/90 font-mono mt-1.5 bg-amber-950/30 p-1.5 rounded border border-amber-800/40">
+                        * Préstamo totalmente liquidado en el libro contable ($0). Los abonos registrados superaron el capital prestado en {formatCOP(summary.overpayment)} (saldo a favor del deudor).
+                      </p>
+                    )}
                   </div>
 
                   {/* Detalles */}
